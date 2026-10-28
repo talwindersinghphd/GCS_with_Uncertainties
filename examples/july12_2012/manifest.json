@@ -1,0 +1,116 @@
+{
+  "date": "2012-07-12T17:54:00Z",
+  "source": "Helioviewer API; STEREO/SECCHI COR2, NRL",
+  "images": [
+    {
+      "spacecraft": "STA",
+      "source_id": 29,
+      "requested_date": "2012-07-12T17:55:00Z",
+      "role": "target",
+      "file": "STA_target_1754.jp2",
+      "image_info": {
+        "id": "118524680",
+        "date": "2012-07-12 17:54:00",
+        "name": "COR2-A",
+        "scale": 14.155785607715872,
+        "scaleCorrection": 1.0384446619470906,
+        "width": 2048,
+        "height": 2048,
+        "refPixelX": 1016.87,
+        "refPixelY": 1024.02,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotation": 0,
+        "rsun": 67.79164552173836,
+        "dsun": 144059550000,
+        "sunCenterOffsetParams": [],
+        "layeringOrder": 3
+      },
+      "sha256": "0ae579864929dbaa4309d8244393d4d0d97db1a6fdb6010086c90f4b51d01741"
+    },
+    {
+      "spacecraft": "STB",
+      "source_id": 31,
+      "requested_date": "2012-07-12T17:55:00Z",
+      "role": "target",
+      "file": "STB_target_1754.jp2",
+      "image_info": {
+        "id": "118338717",
+        "date": "2012-07-12 17:54:26",
+        "name": "COR2-B",
+        "scale": 14.923262306834422,
+        "scaleCorrection": 0.9850393096198427,
+        "width": 2048,
+        "height": 2048,
+        "refPixelX": 1028.67,
+        "refPixelY": 1024.33,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotation": -1.9586555e-12,
+        "rsun": 64.30524239733498,
+        "dsun": 151869950000,
+        "sunCenterOffsetParams": [],
+        "layeringOrder": 3
+      },
+      "sha256": "5174e9144b4797fc407868dc7967e5cf4122621a9342eb6bb53bebe5912b07d8"
+    },
+    {
+      "spacecraft": "STA",
+      "source_id": 29,
+      "requested_date": "2012-07-12T16:24:00Z",
+      "role": "base",
+      "file": "STA_base.jp2",
+      "image_info": {
+        "id": "118524675",
+        "date": "2012-07-12 16:24:00",
+        "name": "COR2-A",
+        "scale": 14.155696187993938,
+        "scaleCorrection": 1.0384512216691757,
+        "width": 2048,
+        "height": 2048,
+        "refPixelX": 1016.86,
+        "refPixelY": 1024.02,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotation": 0,
+        "rsun": 67.79207375289079,
+        "dsun": 144058640000,
+        "sunCenterOffsetParams": [],
+        "layeringOrder": 3
+      },
+      "sha256": "27dfe9f50e8df767a020756f543c4b08c9ab6b9f92482595fcc274aeb98da3ad"
+    },
+    {
+      "spacecraft": "STB",
+      "source_id": 31,
+      "requested_date": "2012-07-12T16:24:00Z",
+      "role": "base",
+      "file": "STB_base.jp2",
+      "image_info": {
+        "id": "118338722",
+        "date": "2012-07-12 16:24:26",
+        "name": "COR2-B",
+        "scale": 14.922757232800638,
+        "scaleCorrection": 0.9850726491542051,
+        "width": 2048,
+        "height": 2048,
+        "refPixelX": 1028.67,
+        "refPixelY": 1024.33,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotation": -2.8533842e-12,
+        "rsun": 64.30741886564203,
+        "dsun": 151864810000,
+        "sunCenterOffsetParams": [],
+        "layeringOrder": 3
+      },
+      "sha256": "ed3aa1095773fe89954f0030e1309669ca13227c7f9ec79503549de9ae98200f"
+    }
+  ],
+  "canonical_cache": {
+    "file": "maps.npz",
+    "format": "gcs-fixed-normalization-v1",
+    "sha256": "06d324aee0fefed3b1a72956b6b3831bbea95b86a63c1be1e4e6d9538f4b6171",
+    "method": "Decoded source pixels and frozen float64 normalization coefficients, with target observer metadata. No pickle."
+  }
+}

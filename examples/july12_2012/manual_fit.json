@@ -1,0 +1,12 @@
+{
+  "date": "2012-07-12T17:54:00Z",
+  "parameters": {
+    "half_angle": 38.8,
+    "height": 11.5,
+    "kappa": 0.41,
+    "lat": -11.9,
+    "lon": 360.0,
+    "tilt": -86.6
+  },
+  "note": "User manual fit; not an automated best-fit estimate."
+}
