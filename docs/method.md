@@ -13,6 +13,9 @@ boundary is extracted, retaining concavity and filling enclosed holes. Neither a
 convex hull nor the entire interior wireframe is used as the fitted outline. Image
 crop edges are excluded from possible model boundaries.
 
+For new searches both arcs and boundaries are converted through the image WCS
+to projected solar radii before measuring distances or arc-length weights.
+See [distance units](distance_units.md) for the projection and migration rules.
 Distances go from the observed arc to the closest model exterior. Partial traces
 therefore leave untraced model regions unconstrained. Within a view/tier, arcs are
 resampled and pooled with arclength/trapezoidal weights; gaps are never bridged.
@@ -57,8 +60,10 @@ has no events with two complete four-parameter reconstructions.
 - Widen search bounds if compatible candidates approach their edges.
 - Compare broad-only and mixed proposals, seeds, and sample sizes.
 - Check mesh and raster resolution, especially for small allowances.
-- The numeric scales are in native pixels; different instruments may need different
-  allowances even for the same apparent boundary ambiguity.
+- Outline scores and extra allowances are in projected solar radii, independent of
+  pixel scale. Different boundary clarity can still require different allowances.
+  The rasterized silhouette retains finite resolution, so numerical convergence
+  must still be checked. Historical frozen runs retain their native pixel units.
 - Compatibility ranges are conditional on the drawn arcs, the GCS shape family,
   the sampling choices and the selected observations. They do not include all CME
   or background-solar-wind uncertainties.

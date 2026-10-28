@@ -8,6 +8,7 @@ from unittest.mock import patch
 from PyQt5 import QtWidgets
 import gui
 from fit_july12_2012 import prepare_example_session,JulySession
+from distance_metric import PHYSICAL_UNIT, ProjectedDistance
 
 
 class WorkedExample(unittest.TestCase):
@@ -28,6 +29,11 @@ class WorkedExample(unittest.TestCase):
                 self.assertEqual(set(panel.tier_outlines),{0,1})
                 self.assertEqual([len(a) for a in panel.tier_outlines[0]['2']],[4])
                 self.assertEqual([len(a) for a in panel.tier_outlines[1]['2']],[3])
+                self.assertEqual(panel.make_config()['score_unit'],PHYSICAL_UNIT)
+                for i,image in enumerate(window._images):
+                    scale=ProjectedDistance(image).legacy_pixel_scale()
+                    self.assertAlmostEqual(panel.tolerances[i].value(),3*scale,places=9)
+                    self.assertAlmostEqual(panel.tier2_tolerances[i].value(),12*scale,places=9)
                 panel.preview()
                 self.assertIn('STA Tier 1',panel.report.toPlainText())
                 self.assertIn('STB Tier 2',panel.report.toPlainText())

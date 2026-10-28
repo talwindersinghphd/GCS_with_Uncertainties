@@ -29,3 +29,12 @@ The allowances were +3 pixels for Tier 1 and +12 for Tier 2, above each componen
 own manual-fit RMS. Tilt, half-angle and aspect ratio still reached the search
 bounds. These results are not calibrated confidence intervals or a finalized
 512-member forecast ensemble.
+
+## Current physical distance interface
+
+The frozen reference above remains a pixel-based experiment. The current launcher
+converts its saved allowances to projected solar radii separately in each view,
+using the image WCS and observer distance, without changing the original fixtures.
+New annotations use format `gcs-outlines-v3`; new searches export `rms_rsun_*`
+columns, physical reference scores and distance-geometry provenance. A full physical
+search is not claimed to have been rerun merely by loading this example.

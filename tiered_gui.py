@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import numpy as np
+from distance_metric import PHYSICAL_UNIT, ProjectedDistance
 from PyQt5 import QtCore, QtWidgets
 
 from uncertainty_gui import (UncertaintyPanel, SearchWorker, candidate_design,
@@ -11,6 +12,7 @@ from tiered_outlines import TIERS, COLORS, prepare_checks, check_error, move_seg
 
 class TieredPanel(UncertaintyPanel):
     def __init__(self, gui, layout):
+        self.annotation_migration = None
         self.tier_outlines = {}
         self.selected_arcs = {}
         super().__init__(gui, layout)
@@ -48,18 +50,19 @@ class TieredPanel(UncertaintyPanel):
         self.tier2_tolerances = {}
         for i, sc in enumerate(gui._spacecraft):
             spin = QtWidgets.QDoubleSpinBox()
-            spin.setRange(0, 1000)
-            spin.setDecimals(2)
-            spin.setValue(12)
-            spin.setToolTip('Additional Tier 2 RMS allowed ABOVE YOUR MANUAL TIER 2 RMS, in native image pixels. '
-                            '12 is an editable starting value, not a measured uncertainty.')
-            self._parameter_form.insertRow(8 + 2 * i, '{} Tier 2 extra [px]'.format(sc), spin)
+            spin.setRange(0, 100)
+            spin.setDecimals(10)
+            spin.setSingleStep(.01)
+            spin.setValue(.20)
+            spin.setToolTip('Additional Tier 2 RMS allowed ABOVE YOUR MANUAL TIER 2 RMS, in projected solar radii. '
+                            '0.20 is an editable starting allowance, not a measured uncertainty.')
+            self._parameter_form.insertRow(8 + 2 * i, '{} Tier 2 extra [Rsun]'.format(sc), spin)
             self.tier2_tolerances[i] = spin
             spin.valueChanged.connect(self.invalidate)
         for label in self._form.parentWidget().findChildren(QtWidgets.QLabel):
             for i, sc in enumerate(gui._spacecraft):
-                if label.text() == '{} {} allowance [px]'.format(i+1, sc):
-                    label.setText('{} Tier 1 extra [px]'.format(sc))
+                if label.text() == '{} {} allowance [Rsun]'.format(i+1, sc):
+                    label.setText('{} Tier 1 extra [Rsun]'.format(sc))
         for button in self._form.parentWidget().findChildren(QtWidgets.QPushButton):
             if button.text() == 'Clear view':
                 button.setText('Clear tier')
@@ -238,7 +241,10 @@ class TieredPanel(UncertaintyPanel):
 
     def annotation_payload(self):
         self.import_legacy()
-        return dict(format='gcs-outlines-v2', images=self.image_identity(),
+        return dict(format='gcs-outlines-v3', score_unit=PHYSICAL_UNIT,
+            outline_coordinate_unit='native_image_pixels',
+            distance_geometry={str(i): ProjectedDistance(image).provenance() for i,image in enumerate(self.gui._images)},
+            migration=self.annotation_migration, images=self.image_identity(),
             reference=self.gui.get_params_dict(), tier_outlines=self.tier_outlines,
             tier_tolerances={str(i): {'1': s.value(), '2': self.tier2_tolerances[i].value()}
                              for i, s in self.tolerances.items()},
@@ -259,7 +265,7 @@ class TieredPanel(UncertaintyPanel):
                 QtWidgets.QMessageBox.warning(self.gui,'Cannot save traces',str(exc))
 
     def restore_annotations(self, payload):
-        if payload.get('format') not in ('gcs-outlines-v1','gcs-outlines-v2') or payload.get('images') != self.image_identity():
+        if payload.get('format') not in ('gcs-outlines-v1','gcs-outlines-v2','gcs-outlines-v3') or payload.get('images') != self.image_identity():
             raise ValueError('Traces do not match these exact images and metadata, or the format is unsupported.')
         reference = payload['reference']
         if set(reference) != set(PARAMETERS):
@@ -282,9 +288,28 @@ class TieredPanel(UncertaintyPanel):
                     xy = np.asarray(arc,dtype=float)
                     if xy.ndim != 2 or xy.shape[1] != 2 or not np.isfinite(xy).all() or (xy < 0).any() or (xy[:,0] >= w).any() or (xy[:,1] >= h).any():
                         raise ValueError('Invalid or out-of-image annotation coordinates.')
-        settings = payload.get('tier_tolerances',{})
+        physical = payload['format'] == 'gcs-outlines-v3'
+        if physical and (payload.get('score_unit') != PHYSICAL_UNIT or
+                         payload.get('outline_coordinate_unit') != 'native_image_pixels'):
+            raise ValueError('Unsupported saved outline coordinate or distance units.')
+        settings = {str(v):dict(a) for v,a in payload.get('tier_tolerances',{}).items()}
+        # Validate legacy values before conversion and before mutating GUI state.
+        for view, allowances in settings.items():
+            if int(view) not in self.tolerances or any(t not in TIERS or not np.isfinite(v) or
+                    not 0 <= v <= (100 if physical else 1000) for t,v in allowances.items()):
+                raise ValueError('Invalid saved tier allowance.')
+        migration = payload.get('migration') if physical else None
+        if not physical and settings:
+            factors = {view: ProjectedDistance(self.gui._images[int(view)]).legacy_pixel_scale()
+                       for view in settings}
+            settings = {view:{tier:value*factors[view] for tier,value in allowances.items()}
+                        for view,allowances in settings.items()}
+            migration = dict(source_format=payload['format'], source_unit='native_image_pixels',
+                             rsun_per_pixel=factors, original_tier_tolerances=payload['tier_tolerances'],
+                             note='Exact similarity WCS conversion; coordinates and original files retained.')
+
         for view, allowance in settings.items():
-            if int(view) not in self.tolerances or any(t not in TIERS or not np.isfinite(v) or not 0 <= v <= 1000 for t,v in allowance.items()):
+            if int(view) not in self.tolerances or any(t not in TIERS or not np.isfinite(v) or not 0 <= v <= 100 for t,v in allowance.items()):
                 raise ValueError('Invalid tier allowance.')
         search = payload.get('search_settings',{})
         numeric_controls = dict(multiplier=self.multiplier, exponent=self.exponent,
@@ -303,6 +328,7 @@ class TieredPanel(UncertaintyPanel):
         for artist in self.lines.values():
             artist.remove()
         self.lines = {}
+        self.annotation_migration = migration
         self.tier_outlines = tiers
         self.selected_arcs = {}
         for key,value in reference.items():
@@ -325,7 +351,8 @@ class TieredPanel(UncertaintyPanel):
         self.refresh_arcs()
         self.invalidate()
         self.status.setText('Previous unclassified outlines loaded into Tier 1. Assign less-certain segments to Tier 2 before rerunning.'
-                            if legacy else 'Restored both tiers, allowances and manual fit.')
+                            if legacy else ('Restored both tiers; saved pixel allowances converted to solar radii.'
+                                           if not physical else 'Restored both tiers and solar-radius allowances.'))
         return legacy
 
     def load_traces(self):
@@ -338,7 +365,8 @@ class TieredPanel(UncertaintyPanel):
 
     def make_config(self):
         payload = self.annotation_payload()
-        return dict(reference=payload['reference'], tier_outlines=payload['tier_outlines'],
+        return dict(score_unit=PHYSICAL_UNIT, reference=payload['reference'], tier_outlines=payload['tier_outlines'],
+            annotation_migration=payload['migration'],
             tier_tolerances=payload['tier_tolerances'],
             scales={k:s.value() for k,s in self.scales.items()}, scale_sources=self.scale_sources,
             multiplier=self.multiplier.value(), exponent=self.exponent.value(), seed=self.seed.value(),
@@ -349,21 +377,21 @@ class TieredPanel(UncertaintyPanel):
             geometry_mesh=dict(straight=STRAIGHT*self.mesh_density.currentData(),
                                front=FRONT*self.mesh_density.currentData(), circle=CIRCLE*self.mesh_density.currentData()),
             acceptance_rule=payload['rule'],
-            score='Arclength-weighted RMS observed-to-model distance, pooled over separate arcs within each view/tier.',
+            score='Arclength-weighted RMS observed-to-model distance in projected solar radii, pooled over separate arcs within each view/tier.',
             interpretation='Proposal-dependent compatibility ranges, not calibrated confidence intervals.')
 
     def describe_scores(self, baseline, checks):
-        lines = ['Manual RMS / allowed RMS [native image pixels]:']
+        lines = ['Manual RMS / allowed RMS [projected Rsun]:']
         for c in checks:
             error = baseline[c['key']]
-            lines.append('{} Tier {}: {:.2f} / {:.2f} (+{:.2f})'.format(
+            lines.append('{} Tier {}: {:.5f} / {:.5f} (+{:.5f})'.format(
                 self.gui._spacecraft[c['view']],c['tier'],error,error+c['allowance'],c['allowance']))
         return lines
 
     def preview(self):
         try:
             config = self.make_config()
-            checks = prepare_checks(config)
+            checks = prepare_checks(config, dict(enumerate(self.gui._images)))
             images = {c['view']:self.gui._images[c['view']] for c in checks}
             b = project_boundaries(config['reference'],self.gui._date,images,config['resolution'],config['mesh_density'])
             baseline = {c['key']:check_error(c,b[c['view']]) for c in checks}
@@ -382,7 +410,7 @@ class TieredPanel(UncertaintyPanel):
             return
         try:
             config = self.make_config()
-            checks = prepare_checks(config)
+            checks = prepare_checks(config, dict(enumerate(self.gui._images)))
             p = config['reference']
             if not (abs(p['lat']) <= 90 and p['height'] > 0 and 0 < p['half_angle'] < 90 and 0 < p['kappa'] < 1):
                 raise ValueError('Manual fit needs height >0, 0<half_angle<90, 0<kappa<1.')

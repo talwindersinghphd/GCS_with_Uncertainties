@@ -19,15 +19,19 @@ Tier 1 copy. Review its confidence assignments before rerunning.
 9. **Save July 12 session** saves parameters, both tiers, allowances and search
    settings to the ignored session directory. The window stays open.
 
-Default extra allowances are +3 native pixels for Tier 1 and +12 for Tier 2. They
+Default extra allowances are +0.05 projected solar radii for Tier 1 and +0.20 for Tier 2. They
 are editable starting values, not measured statistical uncertainties. There is no
 absolute outline-error cap. If both tiers are used in a view, Tier 2 must have at
 least as much additional flexibility as Tier 1.
 
-Version-2 annotation files preserve both tiers, disconnected arcs, exact image
+Version-3 annotation files record solar-radius units and distance geometry and preserve both tiers, disconnected arcs, exact image
 identities, the manual reference and search settings. Original example fixtures
-are not overwritten. Old version-1 annotations remain readable.
+are not overwritten. Old version-1 and version-2 annotations remain readable. Saved pixel allowances
+are converted per image only when its WCS is an exact isotropic similarity in the
+projected plane. Otherwise loading asks for a new physical-distance session;
+no average pixel scale is guessed. Migration provenance is saved in version 3.
+The original annotation files are not changed by loading them.
 
-Search exports include separate error columns such as `rms_px_view_0_tier_1` and
-`rms_px_view_0_tier_2`. Full configuration, reference scores and allowances are in
+Search exports include separate error columns such as `rms_rsun_view_0_tier_1` and
+`rms_rsun_view_0_tier_2`. Full configuration, reference scores and allowances are in
 `search.json`. Compatible ranges are not calibrated confidence intervals.

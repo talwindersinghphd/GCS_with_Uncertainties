@@ -1,6 +1,7 @@
 """Separate, baseline-relative outline checks for each view and confidence tier."""
 import numpy as np
 from scipy.spatial import cKDTree
+from distance_metric import PHYSICAL_UNIT, ProjectedDistance, score_unit
 from outline_uncertainty import resample_trace, outline_error
 
 TIERS = ('1', '2')
@@ -31,13 +32,24 @@ def weighted_error(sample, boundary):
     return float(np.sqrt(np.average(distances ** 2, weights=weights)))
 
 
-def prepare_checks(config):
+def prepare_checks(config, images=None):
     """Each check is independent; no tier can compensate for another tier."""
     checks = []
+    physical = score_unit(config) == PHYSICAL_UNIT
+    metrics = {}
+    def convert(view, points):
+        if not physical:
+            return points
+        view = int(view)
+        if images is None or view not in images:
+            raise ValueError('Physical scoring needs the observation map for every traced view.')
+        if view not in metrics:
+            metrics[view] = ProjectedDistance(images[view])
+        return metrics[view].transform(points)
     if 'tier_outlines' not in config:
         for view, points in sorted(config['outlines'].items(), key=lambda p: int(p[0])):
             checks.append(dict(key=int(view), view=int(view), tier=None,
-                sample=resample_trace(points), allowance=float(config['tolerances'][str(view)])))
+                sample=resample_trace(convert(view, points)), metric=metrics.get(int(view)), allowance=float(config['tolerances'][str(view)])))
         return checks
     for view, tiers in sorted(config['tier_outlines'].items(), key=lambda p: int(p[0])):
         nonempty = {tier: [a for a in arcs if len(a)] for tier, arcs in tiers.items() if any(len(a) for a in arcs)}
@@ -53,13 +65,16 @@ def prepare_checks(config):
             if not np.isfinite(allowance) or allowance < 0:
                 raise ValueError('Tier allowances must be finite and nonnegative.')
             checks.append(dict(key='view_{}_tier_{}'.format(view, tier), view=int(view), tier=tier,
-                               sample=sample_arcs(nonempty[tier]), allowance=allowance))
+                               sample=sample_arcs([convert(view, arc) for arc in nonempty[tier]]),
+                               metric=metrics.get(int(view)), allowance=allowance))
     if not checks:
         raise ValueError('Draw at least one outline arc with two distinct points.')
     return checks
 
 
 def check_error(check, boundary):
+    if check.get('metric') is not None:
+        boundary = check['metric'].transform(boundary)
     return weighted_error(check['sample'], boundary) if check['tier'] is not None else outline_error(check['sample'], boundary)
 
 

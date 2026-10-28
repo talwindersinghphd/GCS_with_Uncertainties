@@ -10,6 +10,7 @@ import numpy as np
 from astropy import units as u
 from PyQt5 import QtCore, QtWidgets
 
+from distance_metric import PHYSICAL_UNIT, ProjectedDistance, score_unit
 from geometry import gcs_mesh_sunpy
 from outline_uncertainty import (PARAMETERS, DEFAULT_SCALES, SCALE_SOURCES,
     resample_trace, surface_faces, silhouette_boundary, outline_error,
@@ -62,7 +63,7 @@ class SearchWorker(QtCore.QThread):
     def run(self):
         try:
             c = self.config
-            checks = prepare_checks(c)
+            checks = prepare_checks(c, self.images)
             boundaries = project_boundaries(c['reference'], self.date, self.images,
                                             c['resolution'], c.get('mesh_density', 1))
             baseline = {check['key']: check_error(check, boundaries[check['view']]) for check in checks}
@@ -108,6 +109,9 @@ class SearchWorker(QtCore.QThread):
                           accepted=accepted, offsets=accepted_offsets,
                           errors=np.asarray(errors).reshape(-1, len(checks)),
                           view_indices=indices, summary=summary, search_edges=edges,
+                          distance_unit=score_unit(c),
+                          distance_geometry={str(i): ProjectedDistance(image).provenance()
+                              for i, image in self.images.items()} if score_unit(c) == PHYSICAL_UNIT else {},
                           score_components=[{k: check[k] for k in ('key', 'view', 'tier', 'allowance')} for check in checks],
                           invalid_geometry=invalid, projection_failures=projection_failures,
                           tested=tested, proposed=2 ** c['exponent'],
@@ -199,12 +203,13 @@ class UncertaintyPanel:
         self.tolerances = {}
         for i, sc in enumerate(gui._spacecraft):
             spin = QtWidgets.QDoubleSpinBox()
-            spin.setRange(0, 1000)
-            spin.setDecimals(2)
-            spin.setValue(3)
-            spin.setToolTip('Allowed additional RMS error above the manual fit, in native image pixels. '
-                            'Set using observed boundary ambiguity; 3 is only a starting value.')
-            grid.addRow('{} {} allowance [px]'.format(i + 1, sc), spin)
+            spin.setRange(0, 100)
+            spin.setDecimals(10)
+            spin.setSingleStep(.01)
+            spin.setValue(.05)
+            spin.setToolTip('Additional projected RMS distance above the manual fit, in solar radii. '
+                            '0.05 is an editable starting allowance, not a measured uncertainty.')
+            grid.addRow('{} {} allowance [Rsun]'.format(i + 1, sc), spin)
             self.tolerances[i] = spin
         self.exponent = QtWidgets.QSpinBox()
         self.exponent.setRange(6, 20)
@@ -405,10 +410,11 @@ class UncertaintyPanel:
                 {k: self.gui._images[k] for k in traces}, self.resolution.currentData(),
                 self.mesh_density.currentData())
             self.invalidate()
-            lines = ['Reference RMS / allowed RMS [native image pixels]:']
+            lines = ['Reference RMS / allowed RMS [projected Rsun]:']
             for k, xy in boundaries.items():
-                error = outline_error(traces[k], xy)
-                lines.append('{}: {:.2f} / {:.2f}'.format(self.gui._spacecraft[k], error,
+                metric = ProjectedDistance(self.gui._images[k])
+                error = outline_error(resample_trace(metric.transform(self.outlines[k])), metric.transform(xy))
+                lines.append('{}: {:.5f} / {:.5f}'.format(self.gui._spacecraft[k], error,
                                                         error + self.tolerances[k].value()))
                 self.overlays.append(self.gui._axes[k].plot(xy[:, 0], xy[:, 1], '.',
                     color='magenta', alpha=.65, ms=1, scalex=False, scaley=False)[0])
@@ -428,7 +434,7 @@ class UncertaintyPanel:
                 raise ValueError('Draw an outline with at least three points in one or more images.')
             for points in outlines.values():
                 resample_trace(points)
-            config = dict(reference=self.gui.get_params_dict(), outlines=outlines,
+            config = dict(score_unit=PHYSICAL_UNIT, reference=self.gui.get_params_dict(), outlines=outlines,
                 scales={k: v.value() for k, v in self.scales.items()},
                 scale_sources=self.scale_sources, multiplier=self.multiplier.value(),
                 exponent=self.exponent.value(), seed=self.seed.value(),
@@ -449,7 +455,7 @@ class UncertaintyPanel:
                     front=FRONT * self.mesh_density.currentData(),
                     circle=CIRCLE * self.mesh_density.currentData()),
                 interpretation='Proposal-dependent compatibility search; accepted quantiles are NOT calibrated credible/confidence intervals.',
-                score='Per-view observed-to-model exterior-boundary RMS in native image pixels; 128 arclength trace points.',
+                score='Per-view observed-to-model exterior-boundary RMS in projected solar radii; 128 physical arclength trace points.',
                 angular_convention='Longitude modulo 360; geometric tilt modulo 180. No magnetic polarity is inferred.')
             candidate_design(config)
             p = config['reference']
@@ -498,7 +504,7 @@ class UncertaintyPanel:
             'Cyan: your trace. Magenta: reference boundary. Orange: accepted examples.'
             .format('CANCELLED — partial search. ' if result['cancelled'] else '', count,
                     result['tested'], result['invalid_geometry'], result['projection_failures']))
-        lines = ['DESIGN-DEPENDENT RANGES; NOT CONFIDENCE INTERVALS.', 'Reference RMS / allowed RMS [px]:']
+        lines = ['DESIGN-DEPENDENT RANGES; NOT CONFIDENCE INTERVALS.', 'Reference RMS / allowed RMS [Rsun]:']
         sampling = result.get('sampling_info', {})
         if 'eligible_events' in sampling:
             lines.insert(1, 'History: {} eligible events; target date held out. {} guided proposals; '
@@ -507,7 +513,7 @@ class UncertaintyPanel:
                              sampling['outside_box_attempts'], sampling['broad_fallback_rows']))
             lines.append('History guides exploration. Accepted frequencies depend on the proposal mixture.')
         for k, e in result['reference_scores'].items():
-            lines.append('{}: {:.2f} / {:.2f}'.format(self.gui._spacecraft[k], e,
+            lines.append('{}: {:.5f} / {:.5f}'.format(self.gui._spacecraft[k], e,
                          e + result['config']['tolerances'][str(k)]))
         lines.append('Parameter: manual | median | accepted min..max')
         for k, s in result['summary'].items():
@@ -550,7 +556,7 @@ def export_result(result, root):
     metadata['software'] = dict(numpy=np.__version__)
     metadata['units'] = dict(lat='degrees', lon='degrees modulo 360',
                              tilt='geometric degrees modulo 180', height='solar radii',
-                             half_angle='degrees', kappa='dimensionless', errors='native image pixels')
+                             half_angle='degrees', kappa='dimensionless', errors=result.get('distance_unit', score_unit(result['config'])))
     if len(result['offsets']) > 1:
         metadata['parameter_order'] = list(PARAMETERS)
         metadata['accepted_offset_covariance'] = np.cov(result['offsets'], rowvar=False).tolist()
@@ -563,8 +569,9 @@ def export_result(result, root):
         for key, stats in result['summary'].items():
             writer.writerow(dict(parameter=key, manual=result['config']['reference'][key], **stats))
     components = result.get('score_components', [])
-    score_names = ['rms_px_' + c['key'] if c['tier'] is not None else 'rms_px_view_' + str(c['view'])
-                   for c in components] if components else ['rms_px_view_' + str(k) for k in result['view_indices']]
+    prefix = 'rms_rsun_' if metadata['units']['errors'] == PHYSICAL_UNIT else 'rms_px_'
+    score_names = [prefix + c['key'] if c['tier'] is not None else prefix + 'view_' + str(c['view'])
+                   for c in components] if components else [prefix + 'view_' + str(k) for k in result['view_indices']]
     fieldnames = list(PARAMETERS) + score_names
     has_sources = 'accepted_sampling_labels' in result
     if has_sources:
@@ -583,5 +590,6 @@ def export_result(result, root):
     selected = np.random.default_rng(result['config']['seed']).choice(count, min(512, count), replace=False)
     write_rows(destination / 'selected_up_to_512.csv', selected)
     np.savez_compressed(destination / 'accepted_arrays.npz', parameters=result['accepted'],
-                        offsets=result['offsets'], errors=result['errors'], selected=selected)
+                        offsets=result['offsets'], errors=result['errors'], selected=selected,
+                        error_unit=metadata['units']['errors'])
     return destination

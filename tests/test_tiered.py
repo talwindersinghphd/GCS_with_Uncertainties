@@ -122,7 +122,7 @@ class TierIntegration(unittest.TestCase):
         self.assertEqual(panel.tier2_tolerances[0].value(),16)
         self.assertEqual(panel.seed.value(),17)
         self.assertEqual(window.get_params_dict(),payload['reference'])
-        self.assertEqual(saved['format'],'gcs-outlines-v2')
+        self.assertEqual(saved['format'],'gcs-outlines-v3')
         panel.preview()
         self.assertIn('Tier 1',panel.report.toPlainText())
         self.assertIn('Tier 2',panel.report.toPlainText())

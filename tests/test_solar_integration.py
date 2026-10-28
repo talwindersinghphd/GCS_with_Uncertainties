@@ -145,7 +145,7 @@ class SolarTests(unittest.TestCase):
             spin.setValue(.1)
         panel.exponent.setValue(6)
         for spin in panel.tolerances.values():
-            spin.setValue(20)
+            spin.setValue(.05)
         panel.resolution.setCurrentIndex(0)
         panel.start()
         from time import monotonic

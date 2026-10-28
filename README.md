@@ -30,7 +30,15 @@ candidate RMS <= manual RMS for the same view/tier + additional allowance
 
 Every check must pass. Better Tier 2 agreement cannot compensate for a Tier 1
 failure. There is no new absolute distance threshold. Initial additional allowances
-are +3 native pixels for Tier 1 and +12 for Tier 2; both are editable starting values.
+are +0.05 solar radii for Tier 1 and +0.20 for Tier 2; both are editable starting
+values, not measured uncertainties. Scores and arc-length weights use the observer's
+projected Sun-centred plane in fixed solar radii (1 Rsun = 695700 km). Each map's
+helioprojective WCS and `DSUN_OBS` are required; unequal pixel scales and rotations
+are handled before measuring distances. This is a projected distance, not a 3D
+CME separation. See [distance units](docs/distance_units.md).
+
+Saved pixel-based July 12 allowances are converted separately for each image on
+load. The frozen reference run retains its original pixel units and results.
 
 ## Install
 

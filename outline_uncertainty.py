@@ -1,7 +1,9 @@
 """Outline-compatible GCS searches. No GUI or solar dependencies in this module.
 
 These are bounded search results, NOT calibrated posterior samples. Angles are
-degrees; traced coordinates, distances, and tolerances are native image pixels.
+degrees. Low-level distance routines use the coordinates supplied by the caller.
+The GUI stores annotations in pixels but transforms them into projected solar radii
+before scoring; old unversioned search configurations retain native pixel scoring.
 """
 import numpy as np
 from PIL import Image, ImageDraw
