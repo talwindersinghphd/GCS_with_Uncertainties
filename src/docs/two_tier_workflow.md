@@ -44,9 +44,9 @@ Tier 1 copy. Review its confidence assignments before saving.
    running finish, and retains the partial results.
 8. Switch the figure area between **Coronagraphs** and **Accepted parameter
    histograms** to inspect the overlays and all six parameter distributions.
-   The coronagraph preview updates about once a second, showing up to 6
-   representative accepted outlines in rose pink and the manual outline in
-   thicker bright pink. After the search, it expands to up to 20 outlines.
+   The coronagraph preview updates about once a second, keeping every accepted
+   outline found so far in rose pink and the manual outline in thicker bright
+   pink. Completed, cancelled and reopened searches show all accepted outlines.
    It reuses scored silhouettes; projections for untraced views run separately
    so candidate scoring keeps moving. Save finishes the final display before export.
    Histograms update during the search, up to once a second while visible, and

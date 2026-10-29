@@ -22,8 +22,6 @@ from .utils.widgets import SearchStatusLabel, CompactDoubleSpinBox
 from .outline_preview import OutlinePreview
 
 DEFAULT_MAX_PROPOSALS = 65536
-MAX_OVERLAY_FITS = 20
-MAX_LIVE_OVERLAY_FITS = 6
 LIVE_PREVIEW_INTERVAL_MS = 1000
 LIVE_HISTOGRAM_INTERVAL_MS = 1000
 ACCEPTED_OUTLINE_STYLE = dict(color='#e779a5', alpha=.25, ms=1)
@@ -94,10 +92,10 @@ class SearchWorker(QtCore.QThread):
             return
         if choices:
             self._last_overlay_preview = time.monotonic()
-        ordered = sorted(choices, key=lambda item: item[1])
+        ordered = sorted(choices, key=lambda item: item[0])
         preview = dict(reference_boundaries=reference, config=self.config,
-            overlays=[item[2] for item in ordered], overlay_keys=[item[1] for item in ordered],
-            overlay_parameters=[dict(zip(PARAMETERS, self._preview_values[item[1]].tolist())) for item in ordered])
+            overlays=[item[2] for item in ordered], overlay_keys=[item[0] for item in ordered],
+            overlay_parameters=[dict(zip(PARAMETERS, item[1].tolist())) for item in ordered])
         self.preview_ready.emit(preview)
         return preview
 
@@ -111,7 +109,6 @@ class SearchWorker(QtCore.QThread):
     def run(self):
         pool = None
         self._target_reached.clear()
-        self._preview_values = {}
         self._last_overlay_preview = None
         try:
             c = self.config
@@ -191,16 +188,10 @@ class SearchWorker(QtCore.QThread):
                         accepted_records.append(record)
                         self.accepted_fit.emit(record[1], record[2])
                         errors.append(score)
-                        # Priorities and final ordering are independent of CPU completion order.
-                        priority = np.random.default_rng(c['seed'] + ordinal).random()
-                        overlay_choices.append((priority, ordinal, b))
-                        overlay_choices.sort(key=lambda item: (item[0], item[1]))
-                        del overlay_choices[MAX_OVERLAY_FITS:]
-                        self._preview_values = {item[1]: self._preview_values[item[1]]
-                            for item in overlay_choices if item[1] in self._preview_values}
-                        if any(item[1] == ordinal for item in overlay_choices):
-                            self._preview_values[ordinal] = record[1]
-                            self.report_preview(boundaries, overlay_choices)
+                        # Each snapshot includes every accepted fit so earlier
+                        # outlines remain visible as the search progresses.
+                        overlay_choices.append((ordinal, record[1], b))
+                        self.report_preview(boundaries, overlay_choices)
                         if target is not None and len(accepted_records) >= target:
                             self._target_reached.set()
                     self.report_progress(tested, batch_tested + len(values), len(accepted_records))
@@ -482,7 +473,7 @@ class UncertaintyPanel:
             'Height, half-angle and κ remain broad.<br><br>'
             '<b>Running:</b> CPUs score fits in parallel. Target accepted fits sets the desired match count; '
             'cancelling or reaching the search limit can leave fewer.<br><br>'
-            '<b>Results:</b> Rose pink previews up to 6 accepted outlines while searching and up to 20 afterward; bright pink '
+            '<b>Results:</b> Rose pink shows all accepted outlines found so far; bright pink '
             'marks your manual fit. Switch to Accepted parameter histograms to watch fractions update. '
             'Save after the search to keep the fit, outlines and all accepted results.')
         self.search_help.setWordWrap(True)
@@ -606,12 +597,6 @@ class UncertaintyPanel:
 
     def _prepare_preview(self, source):
         preview = source
-        if source is not self._final_preview_result and len(source['overlays']) > MAX_LIVE_OVERLAY_FITS:
-            selected = np.linspace(0, len(source['overlays']) - 1, MAX_LIVE_OVERLAY_FITS, dtype=int)
-            preview = dict(source)
-            for key in ('overlays', 'overlay_keys', 'overlay_parameters'):
-                if key in source:
-                    preview[key] = [source[key][i] for i in selected]
         views = set(range(len(self.gui._images)))
         missing = any(views.difference(boundaries) for boundaries in
                       [preview['reference_boundaries']] + preview['overlays'])
@@ -674,8 +659,9 @@ class UncertaintyPanel:
                 self.overlays.append(artist)
 
     def update_search_overlays(self, preview):
-        accepted = {(slot, view): (view, xy)
-                    for slot, boundaries in enumerate(preview['overlays'])
+        keys = preview.get('overlay_keys', range(len(preview['overlays'])))
+        accepted = {(key, view): (view, xy)
+                    for key, boundaries in zip(keys, preview['overlays'])
                     for view, xy in boundaries.items()}
         reference = {view: (view, xy) for view, xy in preview['reference_boundaries'].items()}
         self._update_overlay_group(self._accepted_overlay_artists, accepted, ACCEPTED_OUTLINE_STYLE)
@@ -1015,7 +1001,7 @@ class UncertaintyPanel:
         self.finish_overlay_preview(result)
         count = len(result['accepted'])
         self.set_search_status('{}Accepted {} of {} scored; {} invalid geometries, {} unusable projections. '
-            'Cyan: your trace. Bright pink: manual fit. Rose pink: accepted examples.'
+            'Cyan: your trace. Bright pink: manual fit. Rose pink: all accepted fits.'
             .format('CANCELLED — partial search. ' if result['cancelled'] else '', count,
                     result['tested'], result['invalid_geometry'], result['projection_failures']))
         lines = ['DESIGN-DEPENDENT RANGES; NOT CONFIDENCE INTERVALS.', 'Reference RMS / allowed RMS [RSun]:']

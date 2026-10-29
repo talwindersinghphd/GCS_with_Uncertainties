@@ -99,8 +99,9 @@ minutes early**, beyond the selected **20-minute** threshold. It stays visible
 with a red title and border. Here C2 was **untraced**, supplying visual context.
 A traced red-marked view still constrains the search.
 
-Live previews update about once a second: up to **6 outlines while searching**,
-then **20 afterward**. **Accepted parameter histograms** includes every accepted fit:
+Live previews update about once a second and keep **every accepted outline found
+so far** visible. Completed, cancelled and reopened searches show all their accepted
+outlines. **Accepted parameter histograms** includes every accepted fit:
 
 ![Parameter histograms for all 512 accepted fits, with dashed red manual-fit markers](src/docs/images/july12_latest_histograms.png)
 

@@ -1,4 +1,4 @@
-"""Latest-only outline projection jobs, independent of candidate scoring and Qt."""
+"""Cumulative outline snapshots, projected independently of candidate scoring and Qt."""
 from concurrent.futures import ThreadPoolExecutor
 import threading
 
@@ -55,4 +55,5 @@ class OutlinePreview:
         self.cache = cache
         if self.cancelled.is_set():
             return None
-        return dict(reference_boundaries=self.reference, overlays=outlines)
+        return dict(reference_boundaries=self.reference, overlays=outlines,
+                    overlay_keys=list(preview['overlay_keys']))

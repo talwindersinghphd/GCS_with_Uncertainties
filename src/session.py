@@ -9,7 +9,7 @@ import numpy as np
 from .event_config import utc_string
 from .outline_uncertainty import PARAMETERS
 from .search_scoring import display_boundaries
-from .uncertainty_gui import MAX_OVERLAY_FITS, export_result
+from .uncertainty_gui import export_result
 
 
 def write_json(path, payload):
@@ -45,11 +45,11 @@ def load_result(folder, images, date):
     def boundaries(parameters):
         return display_boundaries(parameters, date, views, config['resolution'], config.get('mesh_density', 1))
     result['reference_boundaries'] = boundaries(config['reference'])
-    parameters = result.get('overlay_parameters')
-    if parameters is None:
-        selection = np.linspace(0, len(result['accepted']) - 1,
-                                min(MAX_OVERLAY_FITS, len(result['accepted'])), dtype=int)
-        parameters = [dict(zip(PARAMETERS, result['accepted'][index])) for index in selection]
+    # Older exports saved only a small display sample. Rebuild from every
+    # accepted row so those sessions also show the complete set of outlines.
+    parameters = [dict(zip(PARAMETERS, row)) for row in result['accepted']]
+    result['overlay_parameters'] = parameters
+    result['overlay_keys'] = list(range(len(parameters)))
     result['overlays'] = [boundaries(values) for values in parameters]
     return result
 
