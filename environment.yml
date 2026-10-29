@@ -1,4 +1,4 @@
-name: gcs-outline
+name: GCS_with_Uncertainties
 channels:
   - conda-forge
 dependencies:

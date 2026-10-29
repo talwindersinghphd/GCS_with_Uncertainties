@@ -72,16 +72,15 @@ class JulySession(gui.GCSGui):
         gui.load_image = lambda spacecraft, *args: images[spacecraft]
         gui.load_params = lambda date: self.initial_params.copy()
         super().__init__(DATE, ['STA', 'STB'], runndiff=True)
-        self.setWindowTitle('12 July 2012 CME — TWO-TIER OUTLINES — STEREO A/B 17:54 UTC')
+        self.setWindowTitle(gui.APP_NAME + ' — 12 July 2012 CME — STEREO A/B 17:54 UTC')
         for ax, spacecraft in zip(self._axes, self._spacecraft):
             ax.set_title(spacecraft + ' | ' + str(images[spacecraft].date) + ' UTC', fontsize=9)
-        self.statusBar().showMessage('Make your manual fit, then open Outline uncertainty and trace the observed boundary. Save keeps this window open.')
+        self.statusBar().showMessage('Draw the observed outline first, then adjust the model in Manual fit. Save keeps this window open.')
         traces = folder / 'manual_traces.json'
         if traces.exists():
             legacy = self._uncertainty.restore_annotations(json.loads(traces.read_text()))
-            self._control_tabs.setCurrentIndex(1)
             self.statusBar().showMessage('Saved fit restored. Old outlines are in Tier 1: reassign uncertain segments to Tier 2, then Save.'
-                                        if legacy else 'Saved fit and both outline tiers restored. Review and Save before rerunning.')
+                                        if legacy else 'Saved fit and both outline tiers restored. Review and Save in the Manual fit tab.')
         self._figure.canvas.draw_idle()
 
     def persist(self, include_search=False):
@@ -96,7 +95,7 @@ class JulySession(gui.GCSGui):
         self._figure.savefig(str(self.session_folder / 'manual_fit.png'), dpi=150)
         if include_search and panel.result is not None:
             destination = export_result(panel.result, self.session_folder)
-            self._figure.savefig(str(destination / 'outline_overlays.png'), dpi=150)
+            self.save_search_figures(destination)
         self.statusBar().showMessage('Saved fit, traces and figure to ' + str(self.session_folder))
 
     def save(self):

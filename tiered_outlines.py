@@ -78,6 +78,27 @@ def check_error(check, boundary):
     return weighted_error(check['sample'], boundary) if check['tier'] is not None else outline_error(check['sample'], boundary)
 
 
+def check_errors(checks, boundaries):
+    """Score all tiers, transforming/indexing each view's boundary just once."""
+    trees, scores = {}, []
+    for check in checks:
+        metric = check.get('metric')
+        key = (check['view'], id(metric))
+        if key not in trees:
+            boundary = boundaries[check['view']]
+            if metric is not None:
+                boundary = metric.transform(boundary)
+            trees[key] = cKDTree(boundary)
+        if check['tier'] is not None:
+            points, weights = check['sample']
+            distances = trees[key].query(points)[0]
+            scores.append(float(np.sqrt(np.average(distances ** 2, weights=weights))))
+        else:
+            distances = trees[key].query(check['sample'])[0]
+            scores.append(float(np.sqrt(np.mean(distances ** 2))))
+    return scores
+
+
 def passes_checks(scores, baseline, checks):
     if len(scores) != len(checks):
         raise ValueError('Every view/tier needs a score.')

@@ -1,5 +1,42 @@
 {
-  "format": "gcs-outlines-v2",
+  "format": "gcs-outlines-v3",
+  "score_unit": "projected_solar_radii",
+  "outline_coordinate_unit": "native_image_pixels",
+  "distance_geometry": {
+    "0": {
+      "unit": "projected_solar_radii",
+      "dsun_obs_m": 144059550000.0,
+      "solar_radius_m": 695700000.0,
+      "projection": "Ray intersection with plane through Sun centre normal to observer Sun line",
+      "coordinates": "D/R_sun * (tan(Tx), tan(Ty)/cos(Tx)); image helioprojective WCS"
+    },
+    "1": {
+      "unit": "projected_solar_radii",
+      "dsun_obs_m": 151869950000.0,
+      "solar_radius_m": 695700000.0,
+      "projection": "Ray intersection with plane through Sun centre normal to observer Sun line",
+      "coordinates": "D/R_sun * (tan(Tx), tan(Ty)/cos(Tx)); image helioprojective WCS"
+    }
+  },
+  "migration": {
+    "source_format": "gcs-outlines-v2",
+    "source_unit": "native_image_pixels",
+    "rsun_per_pixel": {
+      "0": 0.014757481655841558,
+      "1": 0.015557580189571414
+    },
+    "original_tier_tolerances": {
+      "0": {
+        "1": 3.0,
+        "2": 12.0
+      },
+      "1": {
+        "1": 3.0,
+        "2": 12.0
+      }
+    },
+    "note": "Exact similarity WCS conversion; coordinates and original files retained. Bundled starting allowances subsequently set to 0.05 RSun for Tier 1 and 0.20 RSun for Tier 2."
+  },
   "images": [
     {
       "spacecraft": "STA",
@@ -638,26 +675,28 @@
   },
   "tier_tolerances": {
     "0": {
-      "1": 3.0,
-      "2": 12.0
+      "1": 0.05,
+      "2": 0.2
     },
     "1": {
-      "1": 3.0,
-      "2": 12.0
+      "1": 0.05,
+      "2": 0.2
     }
   },
   "search_settings": {
     "scales": {
-      "lat": 5.323,
-      "lon": 10.202,
-      "tilt": 23.461,
+      "lat": 5.3,
+      "lon": 10.2,
+      "tilt": 23.5,
       "height": 0.6,
-      "half_angle": 10.0,
-      "kappa": 0.1
+      "half_angle": 5.0,
+      "kappa": 0.05
     },
     "multiplier": 2.0,
     "exponent": 12,
     "seed": 2022,
+    "cpus": 4,
+    "target_accepted": 512,
     "resolution": 1024,
     "mesh_density": 1,
     "sampling": "historical-mixture",

@@ -15,7 +15,7 @@ PARAMETERS = ('lat', 'lon', 'tilt', 'height', 'half_angle', 'kappa')
 # Angular numbers: Singh et al. (2022). The remaining scales are editable
 # exploratory defaults, NOT measurements from that paper or Gaussian sigmas.
 DEFAULT_SCALES = dict(lat=5.74, lon=11.23, tilt=24.71,
-                      height=0.6, half_angle=10.0, kappa=0.1)
+                      height=0.6, half_angle=5.0, kappa=0.05)
 SCALE_SOURCES = dict(lat='Singh et al. 2022 average spread',
                      lon='Singh et al. 2022 average spread',
                      tilt='Singh et al. 2022 average spread',
@@ -62,17 +62,27 @@ def silhouette_boundary(projected, faces, image_shape, resolution=1024):
     pad = 4
     raster_width = int(np.ceil(width / scale)) + 2 * pad
     raster_height = int(np.ceil(height / scale)) + 2 * pad
-    raster = Image.new('1', (raster_width, raster_height), 0)
-    draw = ImageDraw.Draw(raster)
     p = (points + 0.5) / scale + pad
-    for face in faces:
-        q = p[face]
-        draw.polygon([tuple(v) for v in q[[0, 1, 2]]], fill=1)
-        draw.polygon([tuple(v) for v in q[[0, 2, 3]]], fill=1)
+    # Process only the occupied region, on exactly the same raster grid. The
+    # empty halo preserves hole filling and erosion at non-image boundaries.
+    low = np.floor(p.min(axis=0)) - 2
+    high = np.ceil(p.max(axis=0)) + 3
+    x0, y0 = int(np.clip(low[0], 0, raster_width)), int(np.clip(low[1], 0, raster_height))
+    x1, y1 = int(np.clip(high[0], 0, raster_width)), int(np.clip(high[1], 0, raster_height))
+    if x1 <= x0 or y1 <= y0:
+        raise ValueError('No usable model silhouette within image.')
+    raster = Image.new('1', (x1-x0, y1-y0), 0)
+    draw = ImageDraw.Draw(raster)
+    p = p - (x0, y0)
+    # Flatten all triangles together instead of allocating/indexing NumPy
+    # arrays inside thousands of individual Python drawing iterations.
+    triangles = p[np.asarray(faces)[:, (0, 1, 2, 0, 2, 3)]].reshape(-1, 6).tolist()
+    for triangle in triangles:
+        draw.polygon(triangle, fill=1)
     mask = binary_fill_holes(np.asarray(raster, dtype=bool))
     boundary = mask & ~binary_erosion(mask)
     yy, xx = np.nonzero(boundary)
-    xy = (np.column_stack((xx, yy)) + 0.5 - pad) * scale - 0.5
+    xy = (np.column_stack((xx+x0, yy+y0)) + 0.5 - pad) * scale - 0.5
     # Don't interpret an image crop as a physical model boundary.
     inside = ((xy[:, 0] > scale) & (xy[:, 0] < width - 1 - scale) &
               (xy[:, 1] > scale) & (xy[:, 1] < height - 1 - scale))

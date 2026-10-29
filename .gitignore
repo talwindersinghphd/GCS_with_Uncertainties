@@ -12,3 +12,6 @@ data/cache/
 build/
 dist/
 *.egg-info/
+.vscode/
+.idea/
+tests/

@@ -20,21 +20,12 @@ loading the saved native-pixel annotations in another environment. No pickle is 
 two confidence tiers, additional allowances and saved search settings. The launcher
 copies these fixtures into ignored `sessions/july12_2012/` before editing.
 
-The frozen `reference_run/` records a 4096-proposal experiment in the original
-Python 3.7 / SciPy 1.7.3 GCS environment. With the same arclength-weighted scorer,
-297 proposals passed Tier 1 alone; 206 passed all four view/tier checks. The prior
-single-tier run used a slightly different endpoint weighting and accepted 288.
+The bundled annotations use `gcs-outlines-v3` with projected solar-radius units.
+The starting extra RMS allowances are +0.05 RSun for Tier 1 and +0.20 RSun for
+Tier 2 in each view. The half-angle search scale is 5.0° and the κ scale is 0.05.
+All can be edited in Uncertainty and saved with the local session.
 
-The allowances were +3 pixels for Tier 1 and +12 for Tier 2, above each component's
-own manual-fit RMS. Tilt, half-angle and aspect ratio still reached the search
-bounds. These results are not calibrated confidence intervals or a finalized
-512-member forecast ensemble.
-
-## Current physical distance interface
-
-The frozen reference above remains a pixel-based experiment. The current launcher
-converts its saved allowances to projected solar radii separately in each view,
-using the image WCS and observer distance, without changing the original fixtures.
-New annotations use format `gcs-outlines-v3`; new searches export `rms_rsun_*`
-columns, physical reference scores and distance-geometry provenance. A full physical
-search is not claimed to have been rerun merely by loading this example.
+Run an uncertainty search to generate accepted fits, live overlays and parameter
+histograms. Search results are written to your local session when you choose Save;
+generated runs are not part of the bundled example. CSV columns identify physical
+errors as `rms_rsun_*`, with distance geometry and settings recorded in `search.json`.

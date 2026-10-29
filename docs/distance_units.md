@@ -8,8 +8,8 @@ and arc-length weights are computed. One fixed solar radius is 695700 km.
 For helioprojective longitude Tx and latitude Ty, and Sun-observer distance D:
 
 ```text
-X / Rsun = (D / Rsun) * tan(Tx)
-Y / Rsun = (D / Rsun) * tan(Ty) / cos(Tx)
+X / RSun = (D / RSun) * tan(Tx)
+Y / RSun = (D / RSun) * tan(Ty) / cos(Tx)
 ```
 
 This intersects each viewing ray with the plane through the Sun centre normal to
@@ -19,8 +19,8 @@ not recover a 3D distance to the observed CME material. `DSUN_OBS` must be finit
 and in metres; missing geometry is an error, not an assumed Earth distance.
 
 Every view/tier still uses its own manual-fit baseline plus its additional
-allowance. There is no absolute error cap. Fresh session defaults are +0.05 Rsun
-for Tier 1 and +0.20 Rsun for Tier 2; both are editable starting values.
+allowance. There is no absolute error cap. Fresh session defaults are +0.05 RSun
+for Tier 1 and +0.20 RSun for Tier 2; both are editable starting values.
 Physical units standardize the distance scale, not image quality or outline clarity.
 The mesh and silhouette raster are still discretized; compare higher resolutions
 when the extra allowances approach the numerical boundary uncertainty.
@@ -39,10 +39,9 @@ across the image; it rejects migration for unequal scales or nonlinear mappings
 instead of guessing an average. Version 1 has no stored allowances, so the current
 physical defaults apply. Loading does not overwrite the original files.
 
-The bundled July 12 version-2 annotations satisfy the similarity check; their
-3-pixel and 12-pixel allowances convert separately for STEREO-A and STEREO-B.
-Frozen search results are not rewritten or silently relabelled. Old configurations
-without `score_unit` continue to mean native pixels for reproducibility. To run
+The bundled July 12 annotations already use version 3 and physical-distance
+allowances. Saved search results are never relabelled. Old configurations without
+`score_unit` continue to mean native pixels for reproducibility. To run
 physical scoring programmatically, specify `projected_solar_radii`, supply the maps,
 and express all allowances in solar radii.
 

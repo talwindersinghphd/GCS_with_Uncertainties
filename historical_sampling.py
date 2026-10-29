@@ -66,8 +66,8 @@ def guided_candidates(reference, scales, multiplier, exponent, seed,
     the bounds and the independent kernel smoothing widths. Reject outside-box
     proposals instead of clipping; bounded retries fall back to broad sampling.
     """
-    if not 0.25 <= broad_fraction <= 1 or not 0 <= smoothing <= 1:
-        raise ValueError('Broad fraction must be 0.25..1; smoothing must be 0..1.')
+    if not 0 <= broad_fraction <= 1 or not 0 <= smoothing <= 1:
+        raise ValueError('Broad fraction must be 0..1; smoothing must be 0..1.')
     # Generate unfiltered proposals first so geometry rejection is applied once
     # after mixing. This also performs the standard range validation.
     _, _, _, halfwidth = search_candidates(reference, scales, multiplier, exponent, seed)

@@ -6,8 +6,10 @@ from distance_metric import PHYSICAL_UNIT, ProjectedDistance
 from PyQt5 import QtCore, QtWidgets
 
 from uncertainty_gui import (UncertaintyPanel, SearchWorker, candidate_design,
-    project_boundaries, PARAMETERS, STRAIGHT, FRONT, CIRCLE, DEFAULT_HISTORY)
+    project_boundaries, PARAMETERS, STRAIGHT, FRONT, CIRCLE, DEFAULT_HISTORY,
+    DEFAULT_MAX_PROPOSALS, completion_status, MANUAL_OUTLINE_STYLE)
 from tiered_outlines import TIERS, COLORS, prepare_checks, check_error, move_segment
+from utils.widgets import CompactDoubleSpinBox
 
 
 class TieredPanel(UncertaintyPanel):
@@ -26,52 +28,98 @@ class TieredPanel(UncertaintyPanel):
         row = QtWidgets.QHBoxLayout()
         new = QtWidgets.QPushButton('New arc')
         delete = QtWidgets.QPushButton('Delete arc')
-        move = QtWidgets.QPushButton('Move arc')
-        move.setToolTip('Move the entire selected arc to the other tier.')
         new.clicked.connect(self.new_arc)
         delete.clicked.connect(self.delete_arc)
-        move.clicked.connect(self.move_arc)
-        for button in (new, delete, move):
+        self.undo_button.setToolTip('Remove the last point from the selected arc. Click again to undo more points. '
+                                    'Tracing stays active so you can place a replacement point.')
+        for button in (new, self.undo_button, delete):
             row.addWidget(button)
         self._form.insertLayout(position + 2, row)
+        self.undo_button.show()
         self.assign = QtWidgets.QPushButton('Assign segments to selected tier')
         self.assign.setCheckable(True)
-        self.assign.setToolTip('Choose the target tier, enable this mode, then click a drawn segment to reclassify it without redrawing.')
+        self.assign.setToolTip('Choose the target tier, enable this mode, then click the line between two outline points '
+                               'in the other tier. Right-click to finish. Pan/zoom switches off automatically.')
         self._form.insertWidget(position + 3, self.assign)
-        save_session = None
-        if hasattr(gui, 'session_folder'):
-            save_session = QtWidgets.QPushButton('Save July 12 session')
-            save_session.clicked.connect(gui.save)
-            self._form.insertWidget(position + 4, save_session)
         self.assign.toggled.connect(self.toggle_assign)
+        self.outline_help = QtWidgets.QLabel(
+            '<b>Tiers:</b> Cyan (Tier 1) marks clear boundaries. Yellow (Tier 2) marks less certain sections '
+            'and allows more mismatch in the search.<br><br>'
+            '<b>Arcs:</b> Choose a view and tier before tracing. Use New arc across gaps. '
+            'Select an arc to continue drawing. Undo point removes its last point; click repeatedly to step back. '
+            'Delete arc removes the whole selected arc.<br><br>'
+            '<b>Reassigning:</b> Choose the destination tier and enable assignment. Click the line between two '
+            'neighboring points in the other tier. Only that segment changes tier; its position stays fixed. '
+            'Example: choose Tier 2, then click a cyan segment to make it yellow. Right-click finishes.<br><br>'
+            'Trace outline and assignment switch pan/zoom off automatically and keep your zoom level. '
+            'The mode label shows whether editing is on. Right-click or the Stop button ends editing. '
+            'Repeat for each view, then adjust Manual fit and open Uncertainty.')
+        self.outline_help.setWordWrap(True)
+        self.outline_help.setContentsMargins(0, 8, 0, 0)
+        self._form.insertWidget(self._form.indexOf(self.status) + 1, self.outline_help)
         self.tier.currentIndexChanged.connect(self.refresh_arcs)
         self.view.currentIndexChanged.connect(self.refresh_arcs)
         self.arc.currentIndexChanged.connect(self.select_arc)
         self.tier2_tolerances = {}
         for i, sc in enumerate(gui._spacecraft):
-            spin = QtWidgets.QDoubleSpinBox()
+            spin = CompactDoubleSpinBox()
             spin.setRange(0, 100)
             spin.setDecimals(10)
             spin.setSingleStep(.01)
             spin.setValue(.20)
             spin.setToolTip('Additional Tier 2 RMS allowed ABOVE YOUR MANUAL TIER 2 RMS, in projected solar radii. '
                             '0.20 is an editable starting allowance, not a measured uncertainty.')
-            self._parameter_form.insertRow(8 + 2 * i, '{} Tier 2 extra [Rsun]'.format(sc), spin)
             self.tier2_tolerances[i] = spin
             spin.valueChanged.connect(self.invalidate)
-        for label in self._form.parentWidget().findChildren(QtWidgets.QLabel):
-            for i, sc in enumerate(gui._spacecraft):
-                if label.text() == '{} {} allowance [Rsun]'.format(i+1, sc):
-                    label.setText('{} Tier 1 extra [Rsun]'.format(sc))
+        self.allowance_control = QtWidgets.QWidget()
+        allowance_layout = QtWidgets.QVBoxLayout(self.allowance_control)
+        allowance_layout.setContentsMargins(0, 0, 0, 0)
+        allowance_layout.setSpacing(3)
+        heading = QtWidgets.QHBoxLayout()
+        title = QtWidgets.QLabel('Extra RMS allowance [RSun]')
+        font = title.font()
+        font.setBold(True)
+        title.setFont(font)
+        heading.addWidget(title)
+        self.allowance_defaults = QtWidgets.QPushButton('Defaults')
+        self.allowance_defaults.setToolTip('Set every view to +0.05 solar radii for Tier 1 and +0.20 for Tier 2.')
+        self.allowance_defaults.clicked.connect(self.reset_allowances)
+        heading.addWidget(self.allowance_defaults)
+        allowance_layout.addLayout(heading)
+        allowances = QtWidgets.QGridLayout()
+        allowances.setContentsMargins(0, 0, 0, 0)
+        allowances.setHorizontalSpacing(3)
+        allowances.setVerticalSpacing(2)
+        allowances.setAlignment(QtCore.Qt.AlignLeft)
+        for column, text in enumerate(('', 'Tier 1', 'Tier 2')):
+            allowances.addWidget(QtWidgets.QLabel(text), 0, column)
+        for row, sc in enumerate(gui._spacecraft, 1):
+            allowances.addWidget(QtWidgets.QLabel(sc), row, 0)
+            for column, spin in enumerate((self.tolerances[row - 1], self.tier2_tolerances[row - 1]), 1):
+                spin.setFixedWidth(spin.fontMetrics().horizontalAdvance('0.0000000000') + 27)
+                allowances.addWidget(spin, row, column)
+                spin.show()
+        allowance_layout.addLayout(allowances)
+        note = QtWidgets.QLabel('Candidate RMS ≤ manual RMS + allowance.\nRSun = projected solar radii.')
+        note.setWordWrap(True)
+        allowance_layout.addWidget(note)
         for button in self._form.parentWidget().findChildren(QtWidgets.QPushButton):
             if button.text() == 'Clear view':
                 button.setText('Clear tier')
-        self.edit_controls += [self.tier, self.arc, new, delete, move, self.assign,
+        self.edit_controls += [self.tier, self.arc, new, delete, self.assign, self.allowance_defaults,
                                *self.tier2_tolerances.values()]
-        if save_session is not None:
-            self.edit_controls.append(save_session)
-        self.status.setText('Tier 1: cyan; Tier 2: yellow. Each tier must remain within its own manual RMS plus its allowance.')
+        self.status.setText('Tier 1: cyan; Tier 2: yellow. Use separate arcs across gaps.')
         self.refresh_arcs()
+
+    def reset_allowances(self):
+        for spin in self.tolerances.values():
+            spin.setValue(.05)
+        for spin in self.tier2_tolerances.values():
+            spin.setValue(.20)
+
+    def invalidate(self, *args):
+        super().invalidate(*args)
+        self.status.setText('Fit or outlines updated. Choose a tier to continue tracing or assigning segments.')
 
     def import_legacy(self):
         # The original demos/tests can still supply one flat polyline per image.
@@ -123,39 +171,27 @@ class TieredPanel(UncertaintyPanel):
         self.invalidate()
         self.draw_trace(view)
 
-    def move_arc(self):
-        view, tier = self.selection()
-        other = '2' if tier == '1' else '1'
-        arcs = self.arcs_for(view, tier)
-        if arcs:
-            points = arcs.pop(self.selected_arcs.get((view, tier), 0))
-            target = self.arcs_for(view, other)
-            target.append(points)
-            self.selected_arcs[(view, other)] = len(target)-1
-            self.tier.setCurrentIndex(int(other)-1)
-            self.refresh_arcs()
-            self.invalidate()
-            self.draw_trace(view)
-
     def toggle_trace(self, active):
+        super().toggle_trace(active)
         if active:
-            if hasattr(self, 'assign'):
-                self.assign.setChecked(False)
             self.status.setText('Draw in the selected tier. Left-click adds points; right-click ends tracing. '
-                                'Use New arc across gaps. Turn off toolbar pan/zoom.')
+                                'Use New arc across gaps. Your current zoom is kept.')
 
     def toggle_assign(self, active):
         if active:
+            self.prepare_editing()
             self.trace_button.setChecked(False)
             self.status.setText('Select the target tier, then click the middle of a cyan/yellow segment. '
-                                'The segment changes tier without changing its position.')
+                                'The segment changes tier without changing its position. Right-click or Stop assigning segments finishes.')
+        else:
+            self.status.setText('Assignment stopped. Choose Trace outline to draw or enable assignment to change tiers.')
+        self.update_edit_mode()
 
     def click(self, event):
         if self.is_running():
             return
         if event.button == 3:
-            self.trace_button.setChecked(False)
-            self.assign.setChecked(False)
+            self.stop_editing()
             return
         if event.button != 1 or event.inaxes not in self.gui._axes:
             return
@@ -202,7 +238,7 @@ class TieredPanel(UncertaintyPanel):
                     if closest is None or distance < closest[0]:
                         closest = (distance, tier, ai, si)
         if closest is None or closest[0] > 12:
-            self.status.setText('Click nearer a segment in the other tier. Pan/zoom must be off.')
+            self.status.setText('Click nearer the line between two points in the other tier.')
             return
         _, source, ai, si = closest
         move_segment(self.tier_outlines[view], source, ai, si, target)
@@ -250,6 +286,8 @@ class TieredPanel(UncertaintyPanel):
                              for i, s in self.tolerances.items()},
             search_settings=dict(scales={k:s.value() for k,s in self.scales.items()},
                 multiplier=self.multiplier.value(), exponent=self.exponent.value(), seed=self.seed.value(),
+                cpus=self.cpus.value(),
+                target_accepted=self.target_accepted.value(),
                 resolution=self.resolution.currentData(), mesh_density=self.mesh_density.currentData(),
                 sampling=self.sampling.currentData(), broad_fraction=self.broad_fraction.value()),
             rule='Each view/tier RMS <= the frozen manual view/tier RMS + its additional allowance. No absolute cap.')
@@ -312,8 +350,13 @@ class TieredPanel(UncertaintyPanel):
             if int(view) not in self.tolerances or any(t not in TIERS or not np.isfinite(v) or not 0 <= v <= 100 for t,v in allowance.items()):
                 raise ValueError('Invalid tier allowance.')
         search = payload.get('search_settings',{})
+        if 'cpus' in search and (not isinstance(search['cpus'], int) or search['cpus'] < 1):
+            raise ValueError('Saved CPU count must be a positive integer.')
         numeric_controls = dict(multiplier=self.multiplier, exponent=self.exponent,
-                                seed=self.seed, broad_fraction=self.broad_fraction)
+                                seed=self.seed, broad_fraction=self.broad_fraction,
+                                target_accepted=self.target_accepted)
+        if 'target_accepted' in search and type(search['target_accepted']) is not int:
+            raise ValueError('Saved accepted-fit target must be a positive integer.')
         combo_controls = dict(resolution=self.resolution, mesh_density=self.mesh_density,sampling=self.sampling)
         for key,control in numeric_controls.items():
             if key in search and (not np.isfinite(search[key]) or not control.minimum() <= search[key] <= control.maximum()):
@@ -346,13 +389,14 @@ class TieredPanel(UncertaintyPanel):
                 control.setCurrentIndex(control.findData(search[key]))
         for key,value in search.get('scales',{}).items():
             self.scales[key].setValue(value)
+        if 'cpus' in search:
+            self.cpus.setValue(min(search['cpus'], self.cpus.maximum()))
         for view in tiers:
             self.draw_trace(view)
         self.refresh_arcs()
         self.invalidate()
-        self.status.setText('Previous unclassified outlines loaded into Tier 1. Assign less-certain segments to Tier 2 before rerunning.'
-                            if legacy else ('Restored both tiers; saved pixel allowances converted to solar radii.'
-                                           if not physical else 'Restored both tiers and solar-radius allowances.'))
+        self.status.setText('Previous outlines loaded into Tier 1. Assign less-certain segments to Tier 2.'
+                            if legacy else 'Restored the manual fit and both outline tiers.')
         return legacy
 
     def load_traces(self):
@@ -370,6 +414,9 @@ class TieredPanel(UncertaintyPanel):
             tier_tolerances=payload['tier_tolerances'],
             scales={k:s.value() for k,s in self.scales.items()}, scale_sources=self.scale_sources,
             multiplier=self.multiplier.value(), exponent=self.exponent.value(), seed=self.seed.value(),
+            cpus=self.cpus.value(),
+            target_accepted=self.target_accepted.value(),
+            max_proposals=max(DEFAULT_MAX_PROPOSALS, 2 ** self.exponent.value()),
             resolution=self.resolution.currentData(), mesh_density=self.mesh_density.currentData(),
             date=self.gui._date.isoformat(), sampling=self.sampling.currentData(),
             broad_fraction=self.broad_fraction.value()/100., history_path=str(DEFAULT_HISTORY),
@@ -381,7 +428,7 @@ class TieredPanel(UncertaintyPanel):
             interpretation='Proposal-dependent compatibility ranges, not calibrated confidence intervals.')
 
     def describe_scores(self, baseline, checks):
-        lines = ['Manual RMS / allowed RMS [projected Rsun]:']
+        lines = ['Manual RMS / allowed RMS [projected RSun]:']
         for c in checks:
             error = baseline[c['key']]
             lines.append('{} Tier {}: {:.5f} / {:.5f} (+{:.5f})'.format(
@@ -397,8 +444,8 @@ class TieredPanel(UncertaintyPanel):
             baseline = {c['key']:check_error(c,b[c['view']]) for c in checks}
             self.invalidate()
             for view,xy in b.items():
-                self.overlays.append(self.gui._axes[view].plot(xy[:,0],xy[:,1],'.',color='magenta',
-                    alpha=.65,ms=1,scalex=False,scaley=False)[0])
+                self.overlays.append(self.gui._axes[view].plot(xy[:,0],xy[:,1],'.',
+                    scalex=False,scaley=False,**MANUAL_OUTLINE_STYLE)[0])
             self.report.setPlainText('\n'.join(self.describe_scores(baseline,checks)))
             self.status.setText('Each tier uses its own manual baseline plus its own extra allowance. Both must pass separately.')
             self.gui._figure.canvas.draw_idle()
@@ -424,23 +471,22 @@ class TieredPanel(UncertaintyPanel):
         self.set_running(True)
         images = {c['view']:self.gui._images[c['view']] for c in checks}
         self.worker = SearchWorker(config,images,self.gui._date,self.gui)
-        self.worker.progress.connect(self.status.setText)
+        self.begin_live_histograms(config)
+        self.worker.progress.connect(self.set_search_status)
+        self.worker.preview_ready.connect(self.queue_preview)
+        self.worker.accepted_fit.connect(self.queue_histogram_sample)
         self.worker.completed.connect(self.finished)
         self.worker.failed.connect(self.failed)
         self.worker.finished.connect(lambda:self.set_running(False))
+        self.set_search_status('Fits tried: 0 | Accepted: 0 / {}\nPreparing the manual reference and search...'
+                               .format(self.target_accepted.value()))
         self.worker.start()
-        self.status.setText('Computing the manual baseline for each view/tier, then sampling...')
 
     def finished(self,result):
         self.result = result
+        self.stop_live_histograms()
         self.export_button.setEnabled(True)
-        for boundaries in result['overlays']:
-            for view,xy in boundaries.items():
-                self.overlays.append(self.gui._axes[view].plot(xy[:,0],xy[:,1],'.',color='orange',
-                    alpha=.12,ms=1,scalex=False,scaley=False)[0])
-        for view,xy in result['reference_boundaries'].items():
-            self.overlays.append(self.gui._axes[view].plot(xy[:,0],xy[:,1],'.',color='magenta',
-                alpha=.65,ms=1,scalex=False,scaley=False)[0])
+        self.finish_overlay_preview(result)
         lines = self.describe_scores(result['reference_scores'],result['score_components'])
         lines.append('Each view/tier must pass; good Tier 2 agreement cannot offset a Tier 1 failure.')
         lines.append('Parameter: manual | median | accepted min..max')
@@ -451,6 +497,6 @@ class TieredPanel(UncertaintyPanel):
             lines.append('Accepted fits near search bounds: '+', '.join(result['search_edges']))
         lines.append('Compatibility summaries only; not calibrated confidence intervals.')
         self.report.setPlainText('\n'.join(lines))
-        self.status.setText('{}Accepted {} / {} scored. Cyan: Tier 1; yellow: Tier 2; magenta: manual boundary; orange: accepted examples.'
-            .format('CANCELLED, partial search. ' if result['cancelled'] else '',len(result['accepted']),result['tested']))
+        self.set_search_status(completion_status(result) + ' Rose pink: accepted fits; bright pink: manual fit.')
+        self.gui.update_parameter_histograms(result)
         self.gui._figure.canvas.draw_idle()

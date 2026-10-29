@@ -6,15 +6,14 @@ import sys
 from typing import List
 
 import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
-from PyQt5 import QtWidgets
+from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtWidgets import QLabel, QComboBox
 from astropy import units
 from astropy.coordinates import concatenate
 from matplotlib import colors
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas, \
-    NavigationToolbar2QT as NavigationToolbar
+    NavigationToolbar2QT
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpec
 from sunpy import log
@@ -25,23 +24,14 @@ from geometry import gcs_mesh_sunpy, apex_radius
 from utils.helioviewer import get_helioviewer_client
 from utils.widgets import SliderAndTextbox
 from tiered_gui import TieredPanel as UncertaintyPanel
+from uncertainty_gui import export_result
+from parameter_histograms import draw_parameter_histograms
 
 import wget
 from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
-import os.path
 from pathlib import Path
-import shutil
-
-"""
-year=2012
-month=5
-day=3
-hour=10
-minute=50
-second=0
-"""
 
 
 
@@ -52,6 +42,7 @@ hv = None
 
 straight_vertices, front_vertices, circle_vertices = 10, 10, 20
 draw_modes = ['off', 'point cloud', 'grid']
+APP_NAME = 'GCS_with_Uncertainties'
 
 # disable sunpy warnings
 log.setLevel('ERROR')
@@ -76,7 +67,6 @@ def download_HI(date, observatory):
         mm = [0]*sz
         ss = [0]*sz
         usr_totsec = gettotsec(user_datetime.hour,user_datetime.minute,user_datetime.second)
-        # print("usr_totsec",usr_totsec)
         for i in range(sz):
             items   = fnames[i].split('_')
             hh[i]     = int(items[1][0:2])
@@ -158,7 +148,6 @@ def download_Cor2_beacon(date, observatory):
         mm = [0]*sz
         ss = [0]*sz
         usr_totsec = gettotsec(userdt.hour,userdt.minute,userdt.second)
-        # print("usr_totsec",usr_totsec)
         for i in range(sz):
             items   = fnames[i].split('_')
             hh[i]     = int(items[1][0:2])
@@ -192,7 +181,6 @@ def download_Cor2_beacon(date, observatory):
 
 
     Cor2beacon_filename, Cor2beacon_fileindex = getnearbyfilename(avail_filenames,user_datetime)
-    # print("Cor2beacon_filename, Cor2beacon_fileindex",Cor2beacon_filename, Cor2beacon_fileindex)
 
     base_time = user_datetime - dt.timedelta(hours=1)
     print("Time",user_datetime)
@@ -256,7 +244,6 @@ def find_local_Cor2_files(date, observatory, fits_data_dir=None):
         mm = [0] * sz
         ss = [0] * sz
         usr_totsec = gettotsec(userdt.hour, userdt.minute, userdt.second)
-        # print("usr_totsec", usr_totsec)
         for i in range(sz):
             items = fnames[i].split('_')
             date_part = items[0]
@@ -291,7 +278,6 @@ def find_local_Cor2_files(date, observatory, fits_data_dir=None):
         sys.exit("Error: Observatory must be 'STEREO_A' or 'STEREO_B'.")
 
     Cor2beacon_filename, Cor2beacon_fileindex = getnearbyfilename(avail_filenames, user_datetime)
-    # print("Cor2beacon_filename, Cor2beacon_fileindex", Cor2beacon_filename, Cor2beacon_fileindex)
 
     # Cor2beaconbase_filename = avail_filenames[Cor2beacon_fileindex - 1]
 
@@ -442,16 +428,33 @@ def load_params(date):
         }
 
 
+class NavigationToolbar(NavigationToolbar2QT):
+    """Notify the outline editor when navigation takes over mouse clicks."""
+    mode_changed = QtCore.pyqtSignal()
+
+    def pan(self, *args):
+        super().pan(*args)
+        self.mode_changed.emit()
+
+    def zoom(self, *args):
+        super().zoom(*args)
+        self.mode_changed.emit()
+
+
 class GCSGui(QtWidgets.QMainWindow):
     def __init__(self, date: dt.datetime, spacecraft: List[str], runndiff: bool = False,
             detector_stereo: str = 'COR2', detector_soho='C2', detector_histereo ='HI'):
         super().__init__()
+        self.setWindowTitle(APP_NAME)
+        # Qt 5's macOS font kerning can hide spaces after punctuation.
+        font = self.font()
+        font.setKerning(False)
+        self.setFont(font)
         self._spacecraft = spacecraft
         self._date = date
         self._runndiff = runndiff
         self._detector_stereo = detector_stereo
         self._detector_soho = detector_soho
-        # We added this
         self._detector_histereo = detector_histereo
 
         self._root = QtWidgets.QWidget()
@@ -460,8 +463,19 @@ class GCSGui(QtWidgets.QMainWindow):
 
         self._figure = Figure(figsize=(5 * len(spacecraft), 5))
         canvas = FigureCanvas(self._figure)
-        self._mainlayout.addWidget(canvas, stretch=5)
-        self.addToolBar(NavigationToolbar(canvas, self))
+        self._histogram_figure = Figure(figsize=(10, 7))
+        histogram_canvas = FigureCanvas(self._histogram_figure)
+        self._histogram_result = None
+        draw_parameter_histograms(self._histogram_figure)
+        self._figure_tabs = QtWidgets.QTabWidget()
+        self._figure_tabs.addTab(canvas, 'Coronagraphs')
+        self._figure_tabs.addTab(histogram_canvas, 'Accepted parameter histograms')
+        self._mainlayout.addWidget(self._figure_tabs, stretch=5)
+        self._figure_toolbars = [NavigationToolbar(canvas, self), NavigationToolbar(histogram_canvas, self)]
+        for toolbar in self._figure_toolbars:
+            self.addToolBar(toolbar)
+        self._figure_tabs.currentChanged.connect(self.activate_figure_tab)
+        self.activate_figure_tab(0)
         self._current_draw_mode = None
 
         self.create_widgets(date)
@@ -469,12 +483,34 @@ class GCSGui(QtWidgets.QMainWindow):
         self.make_plot()
         self.show()
 
+    def activate_figure_tab(self, index):
+        for i, toolbar in enumerate(self._figure_toolbars):
+            toolbar.setVisible(i == index)
+        if index == 0 and hasattr(self, '_uncertainty'):
+            self._uncertainty.flush_preview()
+        elif index == 1 and hasattr(self, '_uncertainty'):
+            self._uncertainty.flush_live_histograms()
+
+    def update_parameter_histograms(self, result=None):
+        if result is None and self._histogram_result is None:
+            return
+        self._histogram_result = result
+        previous_axes = tuple(self._histogram_figure.axes)
+        draw_parameter_histograms(self._histogram_figure, result)
+        if previous_axes != tuple(self._histogram_figure.axes):
+            self._figure_toolbars[1].update()
+        self._histogram_figure.canvas.draw_idle()
+
+    def save_search_figures(self, destination):
+        self._figure.savefig(str(destination / 'outline_overlays.png'), dpi=150)
+        self._histogram_figure.savefig(str(destination / 'accepted_parameter_histograms.png'), dpi=150)
+
     def create_widgets(self,date: dt.datetime):
         self._date = date
         print('Date=',date)
         params = load_params(date)
         self._s_half_angle = SliderAndTextbox('Half angle, \u03B1 [°]', 0, 90, params['half_angle'])
-        self._s_height = SliderAndTextbox('Apex Height, R\u2090\u209A\u2091\u2093 [Rs]', 0, 70, params['height'])
+        self._s_height = SliderAndTextbox('Apex Height, R\u2090\u209A\u2091\u2093 [RSun]', 0, 70, params['height'])
         self._s_kappa = SliderAndTextbox('Aspect Ratio, \u03BA', 0, 1, params['kappa'], resolution=0.01)
         self._s_lat = SliderAndTextbox('Heliographic Latitude, \u03B8 [°]', -90, 90, params['lat'])
         self._s_lon = SliderAndTextbox('Stonyhurst Longitude, \u03C6 [°]', 0, 360, params['lon'])
@@ -482,6 +518,7 @@ class GCSGui(QtWidgets.QMainWindow):
         sliders = self._s_half_angle, self._s_height, self._s_kappa, self._s_lat, self._s_lon, self._s_tilt
 
         layout = QtWidgets.QVBoxLayout()
+        layout.setSpacing(6)
         for slider in sliders:
             layout.addWidget(slider)
             slider.valueChanged.connect(self.plot_mesh)
@@ -508,13 +545,57 @@ class GCSGui(QtWidgets.QMainWindow):
         tabs = QtWidgets.QTabWidget()
         tabs.setMinimumWidth(360)
         tabs.setMaximumWidth(440)
-        manual_tab = QtWidgets.QWidget()
-        manual_tab.setLayout(layout)
-        tabs.addTab(manual_tab, 'Manual fit')
+        manual_controls = QtWidgets.QWidget()
+        manual_controls.setLayout(layout)
+        # Let the window shrink below the full control height; every control
+        # remains reachable by scrolling on smaller screens.
+        manual_tab = QtWidgets.QScrollArea()
+        manual_tab.setWidgetResizable(True)
+        manual_tab.setFrameShape(QtWidgets.QFrame.NoFrame)
+        manual_tab.setWidget(manual_controls)
+        outline_tab = QtWidgets.QWidget()
+        outline_layout = QtWidgets.QVBoxLayout(outline_tab)
+        self._uncertainty = UncertaintyPanel(self, outline_layout)
+        self._figure_toolbars[0].mode_changed.connect(self._uncertainty.navigation_mode_changed)
+        self._figure_tabs.currentChanged.connect(
+            lambda index: self._uncertainty.stop_editing() if index != 0 else None)
         uncertainty_tab = QtWidgets.QWidget()
         uncertainty_layout = QtWidgets.QVBoxLayout(uncertainty_tab)
-        self._uncertainty = UncertaintyPanel(self, uncertainty_layout)
-        tabs.addTab(uncertainty_tab, 'Outline uncertainty')
+        uncertainty_layout.setContentsMargins(6, 6, 6, 6)
+        uncertainty_layout.setSpacing(4)
+        settings = QtWidgets.QWidget()
+        settings_layout = QtWidgets.QVBoxLayout(settings)
+        settings_layout.setContentsMargins(0, 0, 0, 0)
+        settings_layout.setSpacing(6)
+        for control in (self._uncertainty.range_control, self._uncertainty.allowance_control,
+                        self._uncertainty.cpu_control):
+            settings_layout.addWidget(control)
+            control.show()
+        settings_layout.addStretch(1)
+        settings_scroll = QtWidgets.QScrollArea()
+        settings_scroll.setWidgetResizable(True)
+        settings_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        settings_scroll.setWidget(settings)
+        uncertainty_layout.addWidget(settings_scroll, stretch=1)
+        # Actions and progress stay visible even if a small screen needs scrolling.
+        actions = QtWidgets.QHBoxLayout()
+        actions.addWidget(self._uncertainty.run_button, stretch=2)
+        self._uncertainty.run_button.show()
+        search_save = QtWidgets.QPushButton('Save')
+        search_save.setToolTip('Save the manual fit, outlines and current search results.')
+        search_save.clicked.connect(self.save)
+        actions.addWidget(search_save, stretch=1)
+        uncertainty_layout.addLayout(actions)
+        uncertainty_layout.addWidget(self._uncertainty.search_status)
+        self._uncertainty.search_status.show()
+        self._uncertainty.edit_controls.append(b_save)
+        self._uncertainty.edit_controls.append(search_save)
+        tabs.addTab(outline_tab, 'Draw Outline')
+        tabs.addTab(manual_tab, 'Manual fit')
+        tabs.addTab(uncertainty_tab, 'Uncertainty')
+        tabs.setCurrentWidget(outline_tab)
+        tabs.currentChanged.connect(
+            lambda index: self._uncertainty.stop_editing() if index != 0 else None)
         self._mainlayout.addWidget(tabs, stretch=2)
         self._control_tabs = tabs
         self.showMaximized()
@@ -583,7 +664,7 @@ class GCSGui(QtWidgets.QMainWindow):
 
         # calculate and show quantities
         ra = apex_radius(half_angle, height, kappa)
-        self._l_radius.setText('Apex cross-section radius: {:.2f} Rs'.format(ra))
+        self._l_radius.setText('Apex cross-section radius: {:.2f} RSun'.format(ra))
 
         # check if plot should be shown
         draw_mode = draw_modes[self._cb_mode.currentIndex()]
@@ -651,6 +732,9 @@ class GCSGui(QtWidgets.QMainWindow):
         }
 
     def save(self):
+        if self._uncertainty.is_running():
+            self.statusBar().showMessage('Wait for the search to finish or cancel it before saving.')
+            return
         save_params(self.get_params_dict(),self.get_d())
         # Create the directory if it does not exist
         (Path(__file__).resolve().parent / 'sessions' / 'manual').mkdir(parents=True, exist_ok=True)
@@ -658,11 +742,16 @@ class GCSGui(QtWidgets.QMainWindow):
         date_out = self.get_d().strftime('%Y-%m-%d %H-%M')
         filename1 = Path(__file__).resolve().parent / 'sessions' / 'manual' / f'{date_out}.png'
         self._figure.savefig(filename1)
+        annotations = filename1.with_name('gcs_traces' + date_out + '.json')
+        annotations.write_text(json.dumps(self._uncertainty.annotation_payload(), indent=2, allow_nan=False))
+        if self._uncertainty.result is not None:
+            destination = export_result(self._uncertainty.result, filename1.parent)
+            self.save_search_figures(destination)
         self.close()
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Run the GCS GUI', prog='gcs_gui')
+    parser = argparse.ArgumentParser(description='Manual GCS fitting and outline-based uncertainty searches', prog=APP_NAME)
     parser.add_argument('date', type=lambda d: dt.datetime.strptime(d, '%Y-%m-%d %H:%M'),
                         help='Date and time for the coronagraph images. Format: "yyyy-mm-dd HH:MM" (with quotes). '
                              'The closest available image will be loaded for each spacecraft.')
@@ -683,12 +772,6 @@ def main():
     app.show()
 
     qapp.exec_()
-
-    #Delete the fits_data directory if it exists
-    # if os.path.exists('fits_data'):
-    #     shutil.rmtree('fits_data')
-
-
 
 if __name__ == '__main__':
     main()

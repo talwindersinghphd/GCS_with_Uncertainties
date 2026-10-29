@@ -20,6 +20,14 @@ Distances go from the observed arc to the closest model exterior. Partial traces
 therefore leave untraced model regions unconstrained. Within a view/tier, arcs are
 resampled and pooled with arclength/trapezoidal weights; gaps are never bridged.
 
+For performance the surface is rasterized within an integer-aligned bounding box
+with an empty halo, retaining the original raster grid and boundary extraction.
+Physical coordinate conversion and the nearest-boundary index are shared between
+tiers in each view. A candidate rejected by one view needs no projection of later
+views, because all view/tier checks must pass. Scores for skipped rejected views
+are not computed; every accepted fit retains all component scores. These changes
+preserve the one-way metric, mesh/raster resolution and acceptance rule.
+
 ## Independent baseline-relative acceptance
 
 For every populated view/tier component, accept only when:
@@ -46,8 +54,8 @@ For each historical draw, select an eligible event uniformly and then a pair
 uniformly within that event. Flip the joint angular vector together with probability
 one half and smooth it with small independent Gaussian jitter. Full fit-to-fit
 differences are used, not converted to single-fit standard errors. Missing tilt and
-all shape parameters retain broad proposals. At least 25% of proposals remain broad
-exploration; the default is 30%. Bounds rejection changes the frequencies after
+all shape parameters retain broad proposals. The requested broad-proposal fraction
+is configurable from 0% to 100%; the default is 30%. Bounds rejection changes the frequencies after
 initial event-uniform selection; retry/fallback counts are reported.
 
 This is a proposal mechanism, not a hierarchical posterior fit or a correction for
@@ -63,7 +71,7 @@ has no events with two complete four-parameter reconstructions.
 - Outline scores and extra allowances are in projected solar radii, independent of
   pixel scale. Different boundary clarity can still require different allowances.
   The rasterized silhouette retains finite resolution, so numerical convergence
-  must still be checked. Historical frozen runs retain their native pixel units.
+  must still be checked.
 - Compatibility ranges are conditional on the drawn arcs, the GCS shape family,
   the sampling choices and the selected observations. They do not include all CME
   or background-solar-wind uncertainties.
