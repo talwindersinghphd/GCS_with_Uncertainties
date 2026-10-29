@@ -1,19 +1,17 @@
 GCS_with_Uncertainties
 
 The manual GUI and GCS geometry derive from:
-  Talwinder Singh: https://github.com/talwindersinghphd/GCS_Python
-  Base revision: 43b353b5d245cd5689b7b404d6fccf5ae15661b2
   Johan von Forstner: https://github.com/johan12345/gcs_python
   Copyright (c) 2020 Johan von Forstner, MIT License.
 
 The upstream MIT notice is preserved in LICENSES/gcs_python-MIT.txt.
 The original Python geometry is based on the SolarSoft GCS routines and the
-Thernisien graduated cylindrical shell model, as noted in geometry.py.
+Thernisien graduated cylindrical shell model, as noted in src/geometry.py.
 
 The historical proposal file was derived from the curated matched-event records
 used by Singh et al. (2022), ApJ 933, 123, DOI: 10.3847/1538-4357/ac73f3.
 Its provenance, source-workbook checksum, excluded events and angular conventions
-are recorded in historical_gcs_proposals.json. The original workbooks are not
+are recorded in src/historical_gcs_proposals.json. The original workbooks are not
 distributed here.
 
 Example image data originate from STEREO/SECCHI COR2 (NRL), retrieved through

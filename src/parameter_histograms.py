@@ -2,7 +2,7 @@
 import numpy as np
 from matplotlib.ticker import MaxNLocator
 
-from outline_uncertainty import PARAMETERS
+from .outline_uncertainty import PARAMETERS
 
 PANELS = (
     ('half_angle', 'Half angle', 'Degrees'),

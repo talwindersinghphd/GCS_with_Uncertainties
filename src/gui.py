@@ -7,7 +7,7 @@ from typing import List
 
 import matplotlib
 import numpy as np
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import QLabel, QComboBox
 from astropy import units
 from astropy.coordinates import concatenate
@@ -20,12 +20,14 @@ from sunpy import log
 from sunpy.coordinates import get_horizons_coord
 from sunpy.map import Map
 
-from geometry import gcs_mesh_sunpy, apex_radius
-from utils.helioviewer import get_helioviewer_client
-from utils.widgets import SliderAndTextbox
-from tiered_gui import TieredPanel as UncertaintyPanel
-from uncertainty_gui import export_result
-from parameter_histograms import draw_parameter_histograms
+from .geometry import gcs_mesh_sunpy, apex_radius
+from .utils.helioviewer import get_helioviewer_client
+from .utils.widgets import SliderAndTextbox
+from .utils.figure_page import FigurePage
+from .tiered_gui import TieredPanel as UncertaintyPanel
+from .uncertainty_gui import export_result
+from .parameter_histograms import draw_parameter_histograms
+from .paths import CACHE_ROOT, SESSION_ROOT
 
 import wget
 from datetime import datetime
@@ -43,12 +45,13 @@ hv = None
 straight_vertices, front_vertices, circle_vertices = 10, 10, 20
 draw_modes = ['off', 'point cloud', 'grid']
 APP_NAME = 'GCS_with_Uncertainties'
+TIME_WARNING_COLOR = '#c62828'
 
 # disable sunpy warnings
 log.setLevel('ERROR')
 
 # Some extra function
-def download_HI(date, observatory):
+def download_HI(date, observatory, include_background=True):
 
     user_datetime = date
     print("Observatory", observatory)
@@ -87,7 +90,9 @@ def download_HI(date, observatory):
 
     def listFD(url, ext=''):
 
-        page = requests.get(url).text
+        response = requests.get(url, timeout=60)
+        response.raise_for_status()
+        page = response.text
         soup = BeautifulSoup(page, 'html.parser')
         return [node.get('href') for node in soup.find_all('a') if node.get('href').endswith(ext)]
 
@@ -97,12 +102,12 @@ def download_HI(date, observatory):
     HI_filename, HI_fileindex = getnearbyfilename(avail_filenames,user_datetime)
     print("HI_filename, HI_fileindex",HI_filename, HI_fileindex)
 
-    HIbase_filename = avail_filenames[HI_fileindex-1]
+    HIbase_filename = avail_filenames[HI_fileindex-1] if include_background else HI_filename
     print("HI_filename",HI_filename)
     print("HI base filename",HIbase_filename)
 
     # Define the directory and ensure it exists
-    fits_data_dir = str(Path(__file__).resolve().parent / 'data' / 'cache')
+    fits_data_dir = str(CACHE_ROOT)
     os.makedirs(fits_data_dir, exist_ok=True)
 
     # Construct the full paths for the files in the fits_data directory
@@ -118,6 +123,9 @@ def download_HI(date, observatory):
         HIfile = wget.download(f'{url}/{HI_filename}', out=HI_file_path)
         print("HI File downloaded")
 
+    if not include_background:
+        return HIfile
+
     # Check if HI base file is already downloaded. If so, skip download. If not, download in local directory.
     if os.path.isfile(HIbase_file_path):
         print(f"HI Base File already exists in fits_data directory - [{HIbase_file_path}]")
@@ -129,7 +137,7 @@ def download_HI(date, observatory):
 
     return HIfile,HIbasefile
 
-def download_Cor2_beacon(date, observatory):
+def download_Cor2_beacon(date, observatory, include_background=True):
 
     user_datetime = date
     print("Observatory", observatory)
@@ -159,7 +167,7 @@ def download_Cor2_beacon(date, observatory):
 
         # Check if the minimum time difference is more than 10 minutes (600 seconds)
         if min_value > 600 and not base:
-            sys.exit(f"Error: Closest filename couldn't be found within 10 minutes of {userdt}.")
+            raise ValueError(f"Closest filename couldn't be found within 10 minutes of {userdt}.")
 
         return fnames[min_index],min_index
 
@@ -173,26 +181,28 @@ def download_Cor2_beacon(date, observatory):
 
     def listFD(url, ext=''):
 
-        page = requests.get(url).text
+        response = requests.get(url, timeout=60)
+        response.raise_for_status()
+        page = response.text
         soup = BeautifulSoup(page, 'html.parser')
         return [node.get('href') for node in soup.find_all('a') if node.get('href').endswith(ext)]
 
     avail_filenames = listFD(url, ext)
 
 
-    Cor2beacon_filename, Cor2beacon_fileindex = getnearbyfilename(avail_filenames,user_datetime)
+    Cor2beacon_filename, Cor2beacon_fileindex = getnearbyfilename(avail_filenames,user_datetime, not include_background)
 
     base_time = user_datetime - dt.timedelta(hours=1)
     print("Time",user_datetime)
     print("Base time",base_time)
-    Cor2beaconbase_filename, Cor2beaconbase_fileindex = getnearbyfilename(avail_filenames,base_time, True)
+    Cor2beaconbase_filename = getnearbyfilename(avail_filenames,base_time, True)[0] if include_background else Cor2beacon_filename
 
     # Cor2beaconbase_filename = avail_filenames[Cor2beacon_fileindex-2]
     print("Cor2beacon_filename",Cor2beacon_filename)
     print("Cor2beacon base filename",Cor2beaconbase_filename)
 
     # Define the directory and ensure it exists
-    fits_data_dir = str(Path(__file__).resolve().parent / 'data' / 'cache')
+    fits_data_dir = str(CACHE_ROOT)
     os.makedirs(fits_data_dir, exist_ok=True)
 
     # Construct the full paths for the files in the fits_data directory
@@ -207,6 +217,9 @@ def download_Cor2_beacon(date, observatory):
         print("Cor2beacon File doesn't exist. Downloading ...")
         Cor2beaconfile = wget.download(f'{url}/{Cor2beacon_filename}', out=Cor2beacon_file_path)
         print("Cor2beacon File downloaded")
+
+    if not include_background:
+        return Cor2beaconfile
 
     # Check if Cor2beacon base file is already downloaded. If so, skip download. If not, download in local directory.
     if os.path.isfile(Cor2beaconbase_file_path):
@@ -226,7 +239,7 @@ from datetime import datetime
 
 def find_local_Cor2_files(date, observatory, fits_data_dir=None):
     if fits_data_dir is None:
-        fits_data_dir = str(Path(__file__).resolve().parent / 'data' / 'cache')
+        fits_data_dir = str(CACHE_ROOT)
     user_datetime = date
     print("Observatory", observatory)
 
@@ -376,7 +389,7 @@ def download_helioviewer(date, observatory, instrument, detector):
     global hv
     if hv is None:
         hv = get_helioviewer_client()
-    cache = Path(__file__).resolve().parent / 'data' / 'cache'
+    cache = CACHE_ROOT
     cache.mkdir(parents=True, exist_ok=True)
     file = hv.download_jp2(date, directory=str(cache), observatory=observatory, instrument=instrument, detector=detector)
     f = Map(file)
@@ -393,12 +406,12 @@ def download_helioviewer(date, observatory, instrument, detector):
 
 def save_params(params,date):
     # Create the directory if it does not exist
-    (Path(__file__).resolve().parent / 'sessions' / 'manual').mkdir(parents=True, exist_ok=True)
+    (SESSION_ROOT / 'manual').mkdir(parents=True, exist_ok=True)
     # Define the filenames using pathlib
     # In date string, replace the : with -
     date_out = date.strftime('%Y-%m-%d %H-%M')
-    filename1 = Path(__file__).resolve().parent / 'sessions' / 'manual' / f'gcs_params{date_out}.json'
-    filename2 = Path(__file__).resolve().parent / 'sessions' / 'manual' / 'gcs_params.json'
+    filename1 = SESSION_ROOT / 'manual' / f'gcs_params{date_out}.json'
+    filename2 = SESSION_ROOT / 'manual' / 'gcs_params.json'
     with open(filename1, 'w') as file:
         json.dump(params, file)
     with open(filename2, 'w') as file:
@@ -407,8 +420,8 @@ def save_params(params,date):
 
 def load_params(date):
     date_out = date.strftime('%Y-%m-%d %H-%M')
-    filename1 = Path(__file__).resolve().parent / 'sessions' / 'manual' / f'gcs_params{date_out}.json'
-    filename = Path(__file__).resolve().parent / 'sessions' / 'manual' / 'gcs_params.json'
+    filename1 = SESSION_ROOT / 'manual' / f'gcs_params{date_out}.json'
+    filename = SESSION_ROOT / 'manual' / 'gcs_params.json'
     if os.path.exists(filename1):
         with open(filename1) as file:
             return json.load(file)
@@ -443,14 +456,30 @@ class NavigationToolbar(NavigationToolbar2QT):
 
 class GCSGui(QtWidgets.QMainWindow):
     def __init__(self, date: dt.datetime, spacecraft: List[str], runndiff: bool = False,
-            detector_stereo: str = 'COR2', detector_soho='C2', detector_histereo ='HI'):
+            detector_stereo: str = 'COR2', detector_soho='C2', detector_histereo ='HI',
+            view_detectors=None, images=None, initial_parameters=None, observations=None):
         super().__init__()
         self.setWindowTitle(APP_NAME)
         # Qt 5's macOS font kerning can hide spaces after punctuation.
         font = self.font()
         font.setKerning(False)
         self.setFont(font)
-        self._spacecraft = spacecraft
+        if not spacecraft:
+            raise ValueError('Choose at least one observation view.')
+        self._spacecraft = list(spacecraft)
+        self._view_detectors = list(view_detectors) if view_detectors is not None else [
+            detector_stereo if sc in ('STA', 'STB') else detector_soho if sc == 'SOHO' else detector_histereo
+            for sc in spacecraft]
+        if len(self._view_detectors) != len(self._spacecraft):
+            raise ValueError('Each view needs its own coronagraph.')
+        self._view_labels = ['{} / {}'.format(sc, detector) for sc, detector in zip(self._spacecraft, self._view_detectors)]
+        self._provided_images = list(images) if images is not None else None
+        if self._provided_images is not None and len(self._provided_images) != len(self._spacecraft):
+            raise ValueError('Each observation view needs an image.')
+        self._observations = list(observations) if observations is not None else None
+        if self._observations is not None and len(self._observations) != len(self._spacecraft):
+            raise ValueError('Each observation view needs its own timing information.')
+        self._initial_parameters = initial_parameters
         self._date = date
         self._runndiff = runndiff
         self._detector_stereo = detector_stereo
@@ -467,13 +496,22 @@ class GCSGui(QtWidgets.QMainWindow):
         histogram_canvas = FigureCanvas(self._histogram_figure)
         self._histogram_result = None
         draw_parameter_histograms(self._histogram_figure)
+        self._figure_pages = [FigurePage(canvas), FigurePage(histogram_canvas)]
         self._figure_tabs = QtWidgets.QTabWidget()
-        self._figure_tabs.addTab(canvas, 'Coronagraphs')
-        self._figure_tabs.addTab(histogram_canvas, 'Accepted parameter histograms')
+        self._figure_tabs.addTab(self._figure_pages[0], 'Coronagraphs')
+        self._figure_tabs.addTab(self._figure_pages[1], 'Accepted parameter histograms')
         self._mainlayout.addWidget(self._figure_tabs, stretch=5)
         self._figure_toolbars = [NavigationToolbar(canvas, self), NavigationToolbar(histogram_canvas, self)]
-        for toolbar in self._figure_toolbars:
+        for toolbar, page in zip(self._figure_toolbars, self._figure_pages):
+            page.add_zoom_controls(toolbar)
             self.addToolBar(toolbar)
+        self._page_zoom_shortcuts = []
+        for key, method in ((QtGui.QKeySequence.ZoomIn, 'zoom_in'),
+                            (QtGui.QKeySequence.ZoomOut, 'zoom_out'), ('Ctrl+0', 'fit_page')):
+            shortcut = QtWidgets.QShortcut(QtGui.QKeySequence(key), self)
+            shortcut.activated.connect(lambda method=method: getattr(
+                self._figure_pages[self._figure_tabs.currentIndex()], method)())
+            self._page_zoom_shortcuts.append(shortcut)
         self._figure_tabs.currentChanged.connect(self.activate_figure_tab)
         self.activate_figure_tab(0)
         self._current_draw_mode = None
@@ -502,13 +540,14 @@ class GCSGui(QtWidgets.QMainWindow):
         self._histogram_figure.canvas.draw_idle()
 
     def save_search_figures(self, destination):
+        self._uncertainty.complete_overlay_preview()
         self._figure.savefig(str(destination / 'outline_overlays.png'), dpi=150)
         self._histogram_figure.savefig(str(destination / 'accepted_parameter_histograms.png'), dpi=150)
 
     def create_widgets(self,date: dt.datetime):
         self._date = date
         print('Date=',date)
-        params = load_params(date)
+        params = self._initial_parameters.copy() if self._initial_parameters is not None else load_params(date)
         self._s_half_angle = SliderAndTextbox('Half angle, \u03B1 [°]', 0, 90, params['half_angle'])
         self._s_height = SliderAndTextbox('Apex Height, R\u2090\u209A\u2091\u2093 [RSun]', 0, 70, params['height'])
         self._s_kappa = SliderAndTextbox('Aspect Ratio, \u03BA', 0, 1, params['kappa'], resolution=0.01)
@@ -614,21 +653,30 @@ class GCSGui(QtWidgets.QMainWindow):
         axes = []
         images = []
         self._mesh_plots = []
-        for i, sc in enumerate(spacecraft):
-            if sc in ['STA', 'STB']:
-                detector = self._detector_stereo
-            elif sc == 'SOHO':
-                detector = self._detector_soho
-            else:
-                detector = self._detector_histereo
-            image = load_image(sc, detector, date, runndiff)
+        for i, (sc, detector) in enumerate(zip(spacecraft, self._view_detectors)):
+            image = self._provided_images[i] if self._provided_images is not None else load_image(sc, detector, date, runndiff)
             images.append(image)
             #find remainder of i divided by 3
             col_here = i % cols_max
             #find quotient of i divided by 3
             row_here = i // cols_max
             ax = fig.add_subplot(spec[row_here, col_here], projection=image)
-            ax.set_title(sc)
+            title = '{}\n{} UTC'.format(self._view_labels[i], image.date.isot)
+            timing = self._observations[i] if self._observations is not None else {}
+            warnings = []
+            for flag, key, prefix in (('outside_time_limit', 'time_offset_minutes', ''),
+                    ('background_outside_time_limit', 'background_time_offset_minutes', 'Background: ')):
+                if timing.get(flag):
+                    offset = timing[key]
+                    warnings.append('{}{:.1f} min {} > {:g} min limit'.format(
+                        prefix, abs(offset), 'early' if offset < 0 else 'late', timing['time_limit_minutes']))
+            if warnings:
+                title += '\n' + '\n'.join(warnings)
+                ax.set_title(title, fontsize=9, color=TIME_WARNING_COLOR, fontweight='bold')
+                ax.coords.frame.set_color(TIME_WARNING_COLOR)
+                ax.coords.frame.set_linewidth(1.8)
+            else:
+                ax.set_title(title, fontsize=9)
             ax.tick_params(axis='x',left = False, right = False , labelleft = False ,
                 labelbottom = False, bottom = False)
             ax.tick_params(axis='y',left = False, right = False , labelleft = False ,
@@ -719,6 +767,7 @@ class GCSGui(QtWidgets.QMainWindow):
             self._uncertainty.status.setText('Cancelling search. Close again after it stops; export results first if needed.')
             event.ignore()
         else:
+            self._uncertainty.stop_overlay_preview()
             event.accept()
 
     def get_params_dict(self):
@@ -735,12 +784,13 @@ class GCSGui(QtWidgets.QMainWindow):
         if self._uncertainty.is_running():
             self.statusBar().showMessage('Wait for the search to finish or cancel it before saving.')
             return
+        self._uncertainty.complete_overlay_preview()
         save_params(self.get_params_dict(),self.get_d())
         # Create the directory if it does not exist
-        (Path(__file__).resolve().parent / 'sessions' / 'manual').mkdir(parents=True, exist_ok=True)
+        (SESSION_ROOT / 'manual').mkdir(parents=True, exist_ok=True)
         # Define the filenames using pathlib
         date_out = self.get_d().strftime('%Y-%m-%d %H-%M')
-        filename1 = Path(__file__).resolve().parent / 'sessions' / 'manual' / f'{date_out}.png'
+        filename1 = SESSION_ROOT / 'manual' / f'{date_out}.png'
         self._figure.savefig(filename1)
         annotations = filename1.with_name('gcs_traces' + date_out + '.json')
         annotations.write_text(json.dumps(self._uncertainty.annotation_payload(), indent=2, allow_nan=False))

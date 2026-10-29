@@ -1,8 +1,8 @@
 """Separate, baseline-relative outline checks for each view and confidence tier."""
 import numpy as np
 from scipy.spatial import cKDTree
-from distance_metric import PHYSICAL_UNIT, ProjectedDistance, score_unit
-from outline_uncertainty import resample_trace, outline_error
+from .distance_metric import PHYSICAL_UNIT, ProjectedDistance, score_unit
+from .outline_uncertainty import resample_trace, outline_error
 
 TIERS = ('1', '2')
 COLORS = {'1': 'cyan', '2': '#ffcc33'}

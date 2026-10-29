@@ -4,24 +4,27 @@ import hashlib
 import json
 from pathlib import Path
 import threading
+import time
 import traceback
 
 import numpy as np
 from PyQt5 import QtCore, QtWidgets
 
-from distance_metric import PHYSICAL_UNIT, ProjectedDistance, score_unit
-from outline_uncertainty import (PARAMETERS, DEFAULT_SCALES, SCALE_SOURCES,
+from .distance_metric import PHYSICAL_UNIT, ProjectedDistance, score_unit
+from .outline_uncertainty import (PARAMETERS, DEFAULT_SCALES, SCALE_SOURCES,
     resample_trace, outline_error,
     search_candidates, summarize)
-from historical_sampling import guided_candidates, DEFAULT_HISTORY, load_history, suggested_scales
-from tiered_outlines import prepare_checks, check_error
-from search_scoring import (STRAIGHT, FRONT, CIRCLE, project_boundaries,
+from .historical_sampling import guided_candidates, DEFAULT_HISTORY, load_history, suggested_scales
+from .tiered_outlines import prepare_checks, check_error
+from .search_scoring import (STRAIGHT, FRONT, CIRCLE, project_boundaries, display_boundaries,
     available_cpus, score_candidate, parallel_scores, create_scoring_pool)
-from utils.widgets import SearchStatusLabel, CompactDoubleSpinBox
+from .utils.widgets import SearchStatusLabel, CompactDoubleSpinBox
+from .outline_preview import OutlinePreview
 
 DEFAULT_MAX_PROPOSALS = 65536
 MAX_OVERLAY_FITS = 20
-LIVE_PREVIEW_INTERVAL_MS = 500
+MAX_LIVE_OVERLAY_FITS = 6
+LIVE_PREVIEW_INTERVAL_MS = 1000
 LIVE_HISTOGRAM_INTERVAL_MS = 1000
 ACCEPTED_OUTLINE_STYLE = dict(color='#e779a5', alpha=.25, ms=1)
 MANUAL_OUTLINE_STYLE = dict(color='magenta', alpha=.85, ms=1.5, zorder=3)
@@ -67,9 +70,11 @@ class SearchWorker(QtCore.QThread):
     completed = QtCore.pyqtSignal(object)
     failed = QtCore.pyqtSignal(str)
 
-    def __init__(self, config, images, date, parent=None):
+    def __init__(self, config, images, date, parent=None, display_images=None):
         super().__init__(parent)
         self.config, self.images, self.date = config, images, date
+        self.display_images = display_images if display_images is not None else images
+        self._last_overlay_preview = None
         self.cancelled = threading.Event()
         self._target_reached = threading.Event()
 
@@ -83,9 +88,18 @@ class SearchWorker(QtCore.QThread):
                 text += ' — target reached'
         self.progress.emit(text)
 
-    def report_preview(self, reference, choices):
-        self.preview_ready.emit(dict(reference_boundaries=reference,
-            overlays=[item[2] for item in sorted(choices, key=lambda item: item[1])]))
+    def report_preview(self, reference, choices, force=False):
+        if choices and not force and self._last_overlay_preview is not None and (
+                time.monotonic() - self._last_overlay_preview < LIVE_PREVIEW_INTERVAL_MS / 1000.):
+            return
+        if choices:
+            self._last_overlay_preview = time.monotonic()
+        ordered = sorted(choices, key=lambda item: item[1])
+        preview = dict(reference_boundaries=reference, config=self.config,
+            overlays=[item[2] for item in ordered], overlay_keys=[item[1] for item in ordered],
+            overlay_parameters=[dict(zip(PARAMETERS, self._preview_values[item[1]].tolist())) for item in ordered])
+        self.preview_ready.emit(preview)
+        return preview
 
     def serial_scores(self, values, checks, baseline):
         for index, row in enumerate(values):
@@ -97,6 +111,8 @@ class SearchWorker(QtCore.QThread):
     def run(self):
         pool = None
         self._target_reached.clear()
+        self._preview_values = {}
+        self._last_overlay_preview = None
         try:
             c = self.config
             checks = prepare_checks(c, self.images)
@@ -180,7 +196,10 @@ class SearchWorker(QtCore.QThread):
                         overlay_choices.append((priority, ordinal, b))
                         overlay_choices.sort(key=lambda item: (item[0], item[1]))
                         del overlay_choices[MAX_OVERLAY_FITS:]
+                        self._preview_values = {item[1]: self._preview_values[item[1]]
+                            for item in overlay_choices if item[1] in self._preview_values}
                         if any(item[1] == ordinal for item in overlay_choices):
+                            self._preview_values[ordinal] = record[1]
                             self.report_preview(boundaries, overlay_choices)
                         if target is not None and len(accepted_records) >= target:
                             self._target_reached.set()
@@ -200,12 +219,13 @@ class SearchWorker(QtCore.QThread):
             accepted = np.asarray([row[1] for row in records]).reshape(-1, 6)
             accepted_offsets = np.asarray([row[2] for row in records]).reshape(-1, 6)
             errors = np.asarray(errors).reshape(-1, len(checks))[order]
-            overlays = [item[2] for item in sorted(overlay_choices, key=lambda item: item[1])]
+            preview = self.report_preview(boundaries, overlay_choices, force=True)
             summary, edges = summarize(accepted, accepted_offsets, c['reference'], halfwidth)
             result = dict(config=c, reference_scores=baseline,
                           accepted=accepted, offsets=accepted_offsets,
                           errors=errors,
-                          view_indices=indices, summary=summary, search_edges=edges,
+                          view_indices=indices, display_view_indices=sorted(self.display_images),
+                          summary=summary, search_edges=edges,
                           distance_unit=score_unit(c),
                           distance_geometry={str(i): ProjectedDistance(image).provenance()
                               for i, image in self.images.items()} if score_unit(c) == PHYSICAL_UNIT else {},
@@ -222,7 +242,8 @@ class SearchWorker(QtCore.QThread):
                               'target_reached' if target is not None and len(records) >= target else
                               'proposal_limit' if target is not None else 'fixed_budget'),
                           cpu_workers=cpus,
-                          cancelled=self.cancelled.is_set(), overlays=overlays,
+                          cancelled=self.cancelled.is_set(), overlays=preview['overlays'],
+                          overlay_keys=preview['overlay_keys'], overlay_parameters=preview['overlay_parameters'],
                           sampling_info=sampling_info,
                           accepted_sampling_labels=np.asarray([row[3] for row in records], dtype='U32'),
                           accepted_history_cases=np.asarray([row[4] for row in records], dtype=int),
@@ -244,10 +265,15 @@ class UncertaintyPanel:
         self._accepted_overlay_artists = {}
         self._manual_overlay_artists = {}
         self._pending_preview = None
+        self._preview_projection = None
+        self._preview_future = None
+        self._preview_source = None
+        self._final_preview_result = None
         self._preview_timer = QtCore.QTimer(gui)
         self._preview_timer.setSingleShot(True)
         self._preview_timer.setInterval(LIVE_PREVIEW_INTERVAL_MS)
         self._preview_timer.timeout.connect(self.flush_preview)
+        gui.destroyed.connect(self._shutdown_preview_projection)
         self._live_histogram_result = None
         self._histogram_dirty = False
         self._histogram_timer = QtCore.QTimer(gui)
@@ -298,7 +324,7 @@ class UncertaintyPanel:
         self.mode_label.setFont(font)
         form.addWidget(self.mode_label)
         self.view = QtWidgets.QComboBox()
-        for i, sc in enumerate(gui._spacecraft):
+        for i, sc in enumerate(gui._view_labels):
             self.view.addItem('{}: {}'.format(i + 1, sc), i)
         form.addWidget(self.view)
         row = QtWidgets.QHBoxLayout()
@@ -351,7 +377,7 @@ class UncertaintyPanel:
         self.multiplier.setValue(2)
         self.multiplier.setToolTip('Search half-width = scale × multiplier. The default multiplier of 2 is exploratory, not a confidence level.')
         self.tolerances = {}
-        for i, sc in enumerate(gui._spacecraft):
+        for i, sc in enumerate(gui._view_labels):
             spin = CompactDoubleSpinBox()
             spin.setRange(0, 100)
             spin.setDecimals(10)
@@ -456,7 +482,7 @@ class UncertaintyPanel:
             'Height, half-angle and κ remain broad.<br><br>'
             '<b>Running:</b> CPUs score fits in parallel. Target accepted fits sets the desired match count; '
             'cancelling or reaching the search limit can leave fewer.<br><br>'
-            '<b>Results:</b> Rose pink previews up to 20 accepted outlines during the search; bright pink '
+            '<b>Results:</b> Rose pink previews up to 6 accepted outlines while searching and up to 20 afterward; bright pink '
             'marks your manual fit. Switch to Accepted parameter histograms to watch fractions update. '
             'Save after the search to keep the fit, outlines and all accepted results.')
         self.search_help.setWordWrap(True)
@@ -546,8 +572,7 @@ class UncertaintyPanel:
         self.settings_revision += 1
         self.result = None
         self.export_button.setEnabled(False)
-        self._preview_timer.stop()
-        self._pending_preview = None
+        self.stop_overlay_preview()
         for artist in self.overlays:
             artist.remove()
         self.overlays = []
@@ -561,18 +586,77 @@ class UncertaintyPanel:
         self.gui._figure.canvas.draw_idle()
 
     def queue_preview(self, preview):
-        # Keep only the newest snapshot. Rendering runs on the GUI thread,
-        # at most twice a second, without blocking candidate scoring.
+        # Keep one newest snapshot; never queue a backlog of projection jobs.
         self._pending_preview = preview
         if self.gui._figure.canvas.isVisible() and not self._preview_timer.isActive():
-            self._preview_timer.start()
+            self._preview_timer.start(LIVE_PREVIEW_INTERVAL_MS)
+
+    def _shutdown_preview_projection(self, *args):
+        if self._preview_projection is not None:
+            self._preview_projection.close()
+        self._preview_projection = None
+        self._preview_future = None
+        self._preview_source = None
+
+    def stop_overlay_preview(self):
+        self._preview_timer.stop()
+        self._pending_preview = None
+        self._final_preview_result = None
+        self._shutdown_preview_projection()
+
+    def _prepare_preview(self, source):
+        preview = source
+        if source is not self._final_preview_result and len(source['overlays']) > MAX_LIVE_OVERLAY_FITS:
+            selected = np.linspace(0, len(source['overlays']) - 1, MAX_LIVE_OVERLAY_FITS, dtype=int)
+            preview = dict(source)
+            for key in ('overlays', 'overlay_keys', 'overlay_parameters'):
+                if key in source:
+                    preview[key] = [source[key][i] for i in selected]
+        views = set(range(len(self.gui._images)))
+        missing = any(views.difference(boundaries) for boundaries in
+                      [preview['reference_boundaries']] + preview['overlays'])
+        if missing and 'overlay_parameters' in preview:
+            if self._preview_projection is None:
+                self._preview_projection = OutlinePreview(self.gui._images, self.gui._date)
+            self._preview_source = source
+            self._preview_future = self._preview_projection.submit(preview)
+        else:
+            self._paint_preview(preview, source)
+
+    def _paint_preview(self, preview, source):
+        if self._final_preview_result is not None and source is not self._final_preview_result:
+            return
+        if source is self._final_preview_result:
+            source.update(reference_boundaries=preview['reference_boundaries'], overlays=preview['overlays'])
+            self._final_preview_result = None
+        self.update_search_overlays(preview)
+
+    def _receive_projected_preview(self):
+        future, source = self._preview_future, self._preview_source
+        self._preview_future = None
+        self._preview_source = None
+        preview = future.result()
+        if preview is not None:
+            self._paint_preview(preview, source)
 
     def flush_preview(self):
         self._preview_timer.stop()
-        if self._pending_preview is None or not self.gui._figure.canvas.isVisible():
+        if not self.gui._figure.canvas.isVisible():
             return
-        preview, self._pending_preview = self._pending_preview, None
-        self.update_search_overlays(preview)
+        try:
+            if self._preview_future is not None:
+                if not self._preview_future.done():
+                    self._preview_timer.start(100)
+                    return
+                self._receive_projected_preview()
+            if self._pending_preview is not None:
+                preview, self._pending_preview = self._pending_preview, None
+                self._prepare_preview(preview)
+            if self._preview_future is not None:
+                self._preview_timer.start(100)
+        except Exception as error:
+            self.stop_overlay_preview()
+            self.status.setText('Outline preview unavailable: ' + str(error))
 
     def _update_overlay_group(self, artists, outlines, style):
         for key in list(artists):
@@ -601,8 +685,22 @@ class UncertaintyPanel:
 
     def finish_overlay_preview(self, result):
         self._preview_timer.stop()
-        self._pending_preview = None
-        self.update_search_overlays(result)
+        self._final_preview_result = result
+        self._pending_preview = result
+        if self.gui._figure.canvas.isVisible():
+            self.flush_preview()
+
+    def complete_overlay_preview(self):
+        """Finish the final display when saving; scoring never waits for it."""
+        if self._final_preview_result is None:
+            return
+        self._preview_timer.stop()
+        while self._preview_future is not None or self._pending_preview is not None:
+            if self._preview_future is not None:
+                self._receive_projected_preview()
+            if self._pending_preview is not None:
+                preview, self._pending_preview = self._pending_preview, None
+                self._prepare_preview(preview)
 
     def begin_live_histograms(self, config):
         self._live_histogram_result = dict(config=dict(reference=config['reference']),
@@ -817,8 +915,12 @@ class UncertaintyPanel:
             for k, xy in boundaries.items():
                 metric = ProjectedDistance(self.gui._images[k])
                 error = outline_error(resample_trace(metric.transform(self.outlines[k])), metric.transform(xy))
-                lines.append('{}: {:.5f} / {:.5f}'.format(self.gui._spacecraft[k], error,
+                lines.append('{}: {:.5f} / {:.5f}'.format(self.gui._view_labels[k], error,
                                                         error + self.tolerances[k].value()))
+            boundaries = display_boundaries(self.gui.get_params_dict(), self.gui._date,
+                dict(enumerate(self.gui._images)), self.resolution.currentData(),
+                self.mesh_density.currentData(), existing=boundaries)
+            for k, xy in boundaries.items():
                 self.overlays.append(self.gui._axes[k].plot(xy[:, 0], xy[:, 1], '.',
                     scalex=False, scaley=False, **MANUAL_OUTLINE_STYLE)[0])
             self.report.setPlainText('\n'.join(lines))
@@ -875,7 +977,8 @@ class UncertaintyPanel:
         self.invalidate()
         self.set_running(True)
         images = {int(k): self.gui._images[int(k)] for k in outlines}
-        self.worker = SearchWorker(config, images, self.gui._date, self.gui)
+        self.worker = SearchWorker(config, images, self.gui._date, self.gui,
+                                   display_images=dict(enumerate(self.gui._images)))
         self.begin_live_histograms(config)
         self.worker.progress.connect(self.set_search_status)
         self.worker.preview_ready.connect(self.queue_preview)
@@ -895,10 +998,11 @@ class UncertaintyPanel:
         self.cancel_button.setEnabled(active)
         self.broad_fraction.setEnabled(not active and self._history_available)
         self.guided_fraction.setEnabled(not active and self._history_available)
+        if hasattr(self.gui, 'update_navigation'):
+            self.gui.update_navigation(active)
 
     def failed(self, message):
-        self._preview_timer.stop()
-        self._pending_preview = None
+        self.stop_overlay_preview()
         self.stop_live_histograms()
         self.gui.update_parameter_histograms()
         self.set_search_status('Search failed: ' + message.strip().splitlines()[-1])
@@ -923,7 +1027,7 @@ class UncertaintyPanel:
                              sampling['outside_box_attempts'], sampling['broad_fallback_rows']))
             lines.append('History guides exploration. Accepted frequencies depend on the proposal mixture.')
         for k, e in result['reference_scores'].items():
-            lines.append('{}: {:.5f} / {:.5f}'.format(self.gui._spacecraft[k], e,
+            lines.append('{}: {:.5f} / {:.5f}'.format(self.gui._view_labels[k], e,
                          e + result['config']['tolerances'][str(k)]))
         lines.append('Parameter: manual | median | accepted min..max')
         for k, s in result['summary'].items():

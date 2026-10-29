@@ -1,202 +1,130 @@
 # GCS_with_Uncertainties
 
-Interactive CME reconstruction with manual GCS fitting, two confidence tiers of
-observed outlines, and history-guided searches for compatible geometries.
+Fit CMEs with the GCS model, trace observed boundaries, and search for compatible
+parameters. Use any number of coronagraph views and observation times.
 
-![July 12, 2012 example](docs/images/july12_two_tiers.png)
+## Install and launch
 
-This is a separate project based on
-[Talwinder Singh's GCS_Python](https://github.com/talwindersinghphd/GCS_Python),
-which derives from [Johan von Forstner's Python GCS implementation](https://github.com/johan12345/gcs_python)
-of the Thernisien GCS model. It preserves the manual fitting workflow and adds
-outline-based uncertainty exploration.
-
-## What it does
-
-- Overlay a manually adjusted GCS mesh on coronagraph images.
-- Draw **Tier 1** arcs on clear boundaries and **Tier 2** arcs on less-certain sections.
-- Reassign existing segments between tiers without redrawing them.
-- Keep disconnected arcs separate and weight their errors by arclength.
-- Explore all six geometric parameters with a mixture of historical fit differences
-  and broad sampling, or broad sampling alone.
-- Export all compatible parameter vectors, per-view/tier errors, diagnostics, and
-  a reproducible ensemble of the requested size (512 fits by default).
-
-The rule is deliberately **relative to your manual fit**, separately for every view/tier:
-
-```text
-candidate RMS <= manual RMS for the same view/tier + additional allowance
-```
-
-Every check must pass. Better Tier 2 agreement cannot compensate for a Tier 1
-failure. There is no new absolute distance threshold. Initial additional allowances
-are +0.05 solar radii for Tier 1 and +0.20 for Tier 2; both are editable starting
-values, not measured uncertainties. Scores and arc-length weights use the observer's
-projected Sun-centred plane in fixed solar radii (1 RSun = 695700 km). Each map's
-helioprojective WCS and `DSUN_OBS` are required; unequal pixel scales and rotations
-are handled before measuring distances. This is a projected distance, not a 3D
-CME separation. See [distance units](docs/distance_units.md).
-
-The bundled example uses these physical-distance defaults. Older pixel-based
-annotations can still be loaded with per-image unit conversion.
-
-## Install
-
-Python 3.11 is recommended. Conda provides the native OpenJPEG library used when
-reading JPEG2000 coronagraph images:
+Use Python 3.11 and a graphical desktop.
 
 ```sh
 git clone https://github.com/talwindersinghphd/GCS_with_Uncertainties.git
 cd GCS_with_Uncertainties
 conda env create -f environment.yml
 conda activate GCS_with_Uncertainties
+python launch.py
 ```
 
-The GUI needs a graphical desktop. On Ubuntu/Debian, install the native display
-and image libraries if they are not already present:
+Existing environment: `python -m pip install -r requirements.txt`. JPEG2000
+reading also needs the native OpenJPEG library.
+
+<details>
+<summary>Ubuntu/Debian display libraries</summary>
 
 ```sh
-sudo apt-get update
 sudo apt-get install libegl1 libopengl0 libxkbcommon-x11-0 libopenjp2-7
 ```
 
-If you already have the native image libraries and a suitable Python environment:
+</details>
 
-```sh
-python -m pip install -r requirements.txt
+## Choose your data
+
+Edit **`EVENT` in [launch.py](launch.py)**. Replace these example dates with your
+CME times; all times are **UTC**.
+
+```python
+EVENT = {
+    'name': 'my_cme',
+    'times': ['2024-05-10 18:00', '2024-05-10 18:30'],
+    'views': [
+        {'spacecraft': 'STA', 'coronagraph': 'COR2'},
+        {'spacecraft': 'SOHO', 'coronagraph': 'C2'},
+        {'spacecraft': 'SOHO', 'coronagraph': 'C3'},
+    ],
+    'background': {'mode': 'fixed', 'time': '2024-05-10 17:00'},
+    'max_time_offset_minutes': 20,
+}
 ```
 
-## Try the saved July 12, 2012 example
+Instrument codes are listed in the launcher comments. Images download
+automatically and are cached. Backgrounds can be `fixed` (pre-event), `running`
+(with `minutes`), or `raw` (no subtraction).
 
-```sh
-python fit_july12_2012.py
-```
+Local FITS: add **`'image_folder': '/path/to/C3_fits/'`** to a view. Subfolders are
+searched by FITS observation time on either side of the requested time; available
+instrument headers are checked. Use one instrument's folder per view. Backgrounds
+come from the same folder, or set `background_folder`. Explicit `image` and
+`background_image` files and time templates still work. Maps need helioprojective
+WCS and observer metadata, including `DSUN_OBS`. Saved frames keep their cached
+selection; use a new event name/output folder to select again after adding files.
 
-The project includes the saved manual fit, both confidence tiers, real STEREO-A/B
-COR2 images, and canonical processed image arrays with observer metadata. The
-canonical arrays let the example run offline without requiring a JPEG2000 decoder.
-Inputs are copied into ignored `sessions/july12_2012/` before editing, preserving
-the tracked example.
+Check settings without downloading: `python launch.py --check-config`.
+The bundled July 12 STA/STB COR2 example runs offline with its two original
+views, time and background.
 
-1. Start in **Draw Outline**, choose a view and tier, then draw or reassign segments.
-2. Use **New arc** across gaps, **Undo point** to remove the last traced point,
-   and **Delete arc** to remove the selected arc.
-3. Switch to **Manual fit** to adjust the model to your outlines.
-4. Open **Uncertainty**. Choose **CPUs to use** (1 for sequential scoring) and **Target accepted fits**,
-   adjust **History-guided** / **Broad search**, then **Run uncertainty search**.
-   Defaults are up to 4 CPUs, 512 accepted fits, and a 70% / 30% proposal mix.
-   Live counts show fits tried and accepted against the target; the same button
-   becomes **Cancel search** while it runs.
-5. In **Uncertainty**, choose **Save** to save the July 12 session and completed
-   search results. **Manual fit** also retains its Save button.
+## Draw, fit, search
 
-The figure area has **Coronagraphs** and **Accepted parameter histograms** tabs.
-During or after a search, switch to the histogram tab to inspect all six parameters
-across all retained accepted fits. While visible, it updates at most once a second
-and shows the accepted-fit count so far. Bars show the fraction of accepted fits
-in each bin and sum to 1 for each parameter. Dashed lines mark the
-manual fit; longitude and tilt are unwrapped around it. The figure toolbar follows
-the selected tab. Save also writes `accepted_parameter_histograms.png` into the
-search export folder. Changing the fit or outlines clears the old histograms.
+1. **Draw Outline:** choose a view and tier. Trace clear boundaries in **cyan
+   (Tier 1)** and less certain sections in **yellow (Tier 2)**. Left-click adds
+   points; right-click stops. Use **New arc** across gaps, **Undo point** for
+   corrections, and segment assignment to change an existing segment's tier.
+2. **Manual fit:** adjust the six GCS parameters to follow your traces.
+3. **Uncertainty:** choose CPUs and the target number of accepted fits, review the
+   settings below, then **Run uncertainty search**. Live counters show tried and
+   accepted fits. **Cancel search** keeps partial results.
 
-The controls have three tabs: **Draw Outline** (opened by default), **Manual fit**,
-and **Uncertainty**. Drawing and segment assignment automatically turn off
-toolbar pan/zoom while keeping the current zoom. An explicit mode label and
-**Stop tracing** / **Stop assigning segments** button show when editing is active.
-Selecting pan/zoom or leaving the outline view ends editing.
-The last tab contains search settings, linked mixture
-percentages, editable scales and multiplier, and a read-only **Historical difference**
-column for reference. Latitude, longitude and tilt show the historical differences
-beside their editable scales; these references stay fixed when scales or the
-multiplier change. Height, half-angle and κ have blank historical cells and keep
-their exploratory default scales. New CME sessions start with a half-angle scale
-of 5.0° and a κ scale of 0.05. The search half-width is scale × multiplier. Zero
-fixes a parameter. The **Extra RMS allowance [RSun]** table lets you edit Tier 1 and
-Tier 2 acceptance allowances separately for each view. **Defaults** resets every
-view to +0.05 / +0.20 projected solar radii. Saved sessions retain their existing
-allowances. Settings are saved with the session and search. Numerical resolution
-remains internal. Run, Save and progress stay
-visible below the settings so small windows need no scrolling to reach the actions.
-Save exports available results into a new
-`gcs_uncertainty_*` folder inside the session, including accepted fits and parameter
-summaries. Save without running a search still saves the fit and outlines.
+| Setting | Meaning |
+| --- | --- |
+| Scale × multiplier | Search ± this range around the manual fit; zero fixes a parameter. |
+| History-guided / Broad search | Mix historical angular differences with broad sampling of your ranges. Percentages sum to 100%. |
+| Extra RMS allowance | Additional outline mismatch allowed above the manual RMS, separately for each traced view/tier. Defaults: **0.05 RSun / 0.20 RSun** for Tier 1 / Tier 2. |
 
-Accepted outline examples appear on the coronagraphs during the search, with a
-preview refresh at most twice a second. The display keeps up to 20 representative
-accepted outlines in rose pink; the thicker bright pink outline is the manual
-fit. Existing scoring results are reused, and plot artists are updated in place.
-Preview painting pauses on the histogram tab and catches up when you return.
-All accepted fits remain in the live histograms and saved results. Histogram axes
-and bars are reused between updates; hidden histograms catch up on reopening.
+Each traced view/tier must satisfy **candidate RMS ≤ manual RMS + allowance**.
+RSun denotes projected solar radii. Untraced views show the model and accepted
+outlines for visual comparison, without imposing acceptance checks.
 
-The mixture percentages sum to 100% and can be set anywhere from 0% to 100%.
-History guides the angular offsets; height, half-angle and aspect ratio remain
-broadly sampled. Broad search covers the configured parameter ranges around the
-manual fit. Bounded historical retries can fall back to broad proposals, and
-filtering/early stopping can change actual proportions. At 100% broad search the
-history sampler is bypassed. Save each run before changing the mix to keep its
-settings and histogram image for comparison; changing the mix clears current results.
+Use toolbar pan/zoom for individual plots. **Pinch** zooms the whole figure page;
+**two-finger scrolling** moves around it. **Fit page** restores the overview.
 
-The search generates independently scrambled Sobol batches with a recorded seed
-per batch, but stops scoring as soon as the first requested number of accepted
-fits is established in candidate order. It stops submitting work, lets fits already
-running finish, and excludes later matches from the retained results. It does not
-finish the rest of the batch. `selected_fits.csv` and `accepted_all.csv` contain the
-retained fits, exactly the requested number when the target is reached.
-`parameter_summary.csv` describes those same retained fits.
-The default safety budget is 65,536 proposed candidates; if that limit is reached
-first, the GUI reports the shortfall and exports the smaller, partial ensemble.
-Ranges and allowances stay fixed throughout. Historical mixing and filtering do
-not preserve pure Sobol balance in the accepted fits; stopping mid-batch also
-means the evaluated candidates are not a complete Sobol design.
+## Read the results
 
-Parallel searches use separate worker processes and preserve the candidate order
-in saved results, so a completed search gives the same accepted fits for the same
-settings and seed regardless of CPU count. The tried count can differ slightly
-because of work already in flight. Cancellation stops new submissions and
-waits for fits already running; partial results can be saved. The CPU setting is
-saved with the session and capped to the CPUs available when reopening it.
+![Latest July 12 fit: traced boundaries, manual GCS model, accepted outlines, and a red SOHO C2 time warning](src/docs/images/july12_latest_outlines.png)
 
-Scoring rasterizes only the occupied model region on the original pixel grid,
-shares each view's distance calculation between tiers, and stops evaluating a
-candidate's later views once an earlier view rejects it. CPU workers are reused
-between Sobol batches. Mesh/raster resolution and acceptance thresholds are
-unchanged. Actual search time also
-depends on how many candidates must be tried to reach the accepted-fit target.
+This July 12, 2012 example has **512 accepted fits**, constrained by STA/STB
+outlines; 20 are shown. This run used **0.10 / 0.20 RSun**
+allowances for Tier 1 / Tier 2.
 
-The example observations are at 17:54:00 and 17:54:26 UTC. A non-simultaneous SOHO
-frame is intentionally excluded. The saved manual fit and outlines illustrate
-the workflow; they are not a validated forecast or a target for other events.
+**Red SOHO C2:** requested **17:54 UTC**, closest image **17:12:06 UTC**—**41.9
+minutes early**, beyond the selected **20-minute** threshold. It stays visible
+with a red title and border. Here C2 was **untraced**, supplying visual context.
+A traced red-marked view still constrains the search.
 
-[Detailed tier-editing guide](docs/two_tier_workflow.md) ·
-[Method and interpretation](docs/method.md) ·
-[Example provenance](examples/july12_2012/README.md)
+Live previews update about once a second: up to **6 outlines while searching**,
+then **20 afterward**. **Accepted parameter histograms** includes every accepted fit:
 
-## Other CMEs
+![Parameter histograms for all 512 accepted fits, with dashed red manual-fit markers](src/docs/images/july12_latest_histograms.png)
 
-```sh
-python gui.py "2012-07-12 17:54" STA STB -stereo COR2 -rd
-```
+Bars show the **fraction of accepted fits** in each bin; dashed red lines mark
+the manual fit. Longitude and tilt are unwrapped around it. These are
+**proposal-dependent compatible ranges**, not calibrated confidence intervals.
 
-The general GUI downloads images through the inherited Helioviewer/solar-data
-workflow and needs network access. Cached images and saved sessions stay out of
-Git. The saved July 12 example can be run without a network connection.
+## Save and move through time
 
-## Interpretation
+**Save** writes the fit, traces, settings and results, keeping the window open.
+**Previous / Next** and closing also save. Each new time starts from the current
+parameters and settings but needs fresh outlines; saved times restore their own session.
 
-These are **outline-compatible parameter ranges**, not calibrated confidence or
-credible intervals. Frequencies depend on the proposal distribution, bounds, and
-allowances. Widen bounds when accepted fits approach their limits and assess
-sampling, mesh, and raster convergence.
+Outputs go to **`sessions/<event name>/frames/<UTC time>/`**: manual-fit and trace
+JSON files, figures, and `gcs_uncertainty_*` folders containing accepted parameters
+(CSV/NPZ), summaries and histograms. **`sessions/<event name>/time_series.csv`**
+collects the manual parameters across requested times. Sessions and caches stay
+out of Git. Each time is fitted independently.
 
-This single-time reconstruction estimates neither speed uncertainty nor poloidal
-flux. Speed needs multiple height-time reconstructions; magnetic flux needs separate
-observational constraints. Preserve complete accepted vectors when using their
-joint geometric relationships.
+[Outline editing](src/docs/two_tier_workflow.md) ·
+[Method](src/docs/method.md) · [Distance units](src/docs/distance_units.md) ·
+[Bundled example](src/examples/july12_2012/README.md)
 
-## Attribution
-
-See [NOTICE](NOTICE) and [LICENSE](LICENSE). Historical starting information comes
-from the matched GCS reconstructions used in Singh et al. (2022),
-[ApJ 933, 123](https://doi.org/10.3847/1538-4357/ac73f3). Observer/catalog disagreement
-is not ground-truth reconstruction error.
+Based on [Johan von Forstner's GCS implementation](https://github.com/johan12345/gcs_python).
+Historical guidance uses fits from the [Zenodo dataset](https://zenodo.org/records/5515483)
+used in [Singh et al. (2022)](https://doi.org/10.3847/1538-4357/ac73f3).
+See [LICENSE](LICENSE) and [NOTICE](NOTICE).

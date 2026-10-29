@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from outline_uncertainty import PARAMETERS, search_candidates
+from .outline_uncertainty import PARAMETERS, search_candidates
 
 DEFAULT_HISTORY = Path(__file__).with_name('historical_gcs_proposals.json')
 

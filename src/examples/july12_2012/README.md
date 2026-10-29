@@ -18,7 +18,8 @@ loading the saved native-pixel annotations in another environment. No pickle is 
 
 `manual_fit.json` contains the manual parameters. `manual_traces.json` contains the
 two confidence tiers, additional allowances and saved search settings. The launcher
-copies these fixtures into ignored `sessions/july12_2012/` before editing.
+opens these fixtures with `python launch.py` from the project root. Edits are
+saved to ignored `sessions/july12_2012/frames/<UTC time>/`.
 
 The bundled annotations use `gcs-outlines-v3` with projected solar-radius units.
 The starting extra RMS allowances are +0.05 RSun for Tier 1 and +0.20 RSun for

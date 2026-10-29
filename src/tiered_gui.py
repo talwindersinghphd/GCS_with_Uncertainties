@@ -2,14 +2,14 @@
 import json
 from pathlib import Path
 import numpy as np
-from distance_metric import PHYSICAL_UNIT, ProjectedDistance
+from .distance_metric import PHYSICAL_UNIT, ProjectedDistance
 from PyQt5 import QtCore, QtWidgets
 
-from uncertainty_gui import (UncertaintyPanel, SearchWorker, candidate_design,
-    project_boundaries, PARAMETERS, STRAIGHT, FRONT, CIRCLE, DEFAULT_HISTORY,
+from .uncertainty_gui import (UncertaintyPanel, SearchWorker, candidate_design,
+    project_boundaries, display_boundaries, PARAMETERS, STRAIGHT, FRONT, CIRCLE, DEFAULT_HISTORY,
     DEFAULT_MAX_PROPOSALS, completion_status, MANUAL_OUTLINE_STYLE)
-from tiered_outlines import TIERS, COLORS, prepare_checks, check_error, move_segment
-from utils.widgets import CompactDoubleSpinBox
+from .tiered_outlines import TIERS, COLORS, prepare_checks, check_error, move_segment
+from .utils.widgets import CompactDoubleSpinBox
 
 
 class TieredPanel(UncertaintyPanel):
@@ -61,7 +61,7 @@ class TieredPanel(UncertaintyPanel):
         self.view.currentIndexChanged.connect(self.refresh_arcs)
         self.arc.currentIndexChanged.connect(self.select_arc)
         self.tier2_tolerances = {}
-        for i, sc in enumerate(gui._spacecraft):
+        for i, sc in enumerate(gui._view_labels):
             spin = CompactDoubleSpinBox()
             spin.setRange(0, 100)
             spin.setDecimals(10)
@@ -93,16 +93,24 @@ class TieredPanel(UncertaintyPanel):
         allowances.setAlignment(QtCore.Qt.AlignLeft)
         for column, text in enumerate(('', 'Tier 1', 'Tier 2')):
             allowances.addWidget(QtWidgets.QLabel(text), 0, column)
-        for row, sc in enumerate(gui._spacecraft, 1):
+        for row, sc in enumerate(gui._view_labels, 1):
             allowances.addWidget(QtWidgets.QLabel(sc), row, 0)
             for column, spin in enumerate((self.tolerances[row - 1], self.tier2_tolerances[row - 1]), 1):
-                spin.setFixedWidth(spin.fontMetrics().horizontalAdvance('0.0000000000') + 27)
+                spin.setFixedWidth(spin.fontMetrics().horizontalAdvance('0.0000') + 27)
                 allowances.addWidget(spin, row, column)
                 spin.show()
         allowance_layout.addLayout(allowances)
-        note = QtWidgets.QLabel('Candidate RMS ≤ manual RMS + allowance.\nRSun = projected solar radii.')
-        note.setWordWrap(True)
-        allowance_layout.addWidget(note)
+        self.allowance_help = QtWidgets.QLabel(
+            '<b>Candidate RMS ≤ manual RMS + allowance.</b><br><br>'
+            '<b>Extra RMS allowance:</b> How much more outline mismatch to allow above your manual fit, '
+            'in projected solar radii (RSun). Larger values are more permissive; smaller values are '
+            'stricter. Each traced view and tier must pass separately.<br><br>'
+            'Defaults: Tier 1 = 0.05 RSun; Tier 2 = 0.20 RSun. These are adjustable search tolerances.')
+        self.allowance_help.setWordWrap(True)
+        policy = self.allowance_help.sizePolicy()
+        policy.setHorizontalPolicy(QtWidgets.QSizePolicy.Ignored)
+        self.allowance_help.setSizePolicy(policy)
+        allowance_layout.addWidget(self.allowance_help)
         for button in self._form.parentWidget().findChildren(QtWidgets.QPushButton):
             if button.text() == 'Clear view':
                 button.setText('Clear tier')
@@ -281,6 +289,9 @@ class TieredPanel(UncertaintyPanel):
             outline_coordinate_unit='native_image_pixels',
             distance_geometry={str(i): ProjectedDistance(image).provenance() for i,image in enumerate(self.gui._images)},
             migration=self.annotation_migration, images=self.image_identity(),
+            observations=self.gui._observations,
+            views=[dict(spacecraft=sc, coronagraph=detector) for sc, detector in
+                   zip(self.gui._spacecraft, self.gui._view_detectors)],
             reference=self.gui.get_params_dict(), tier_outlines=self.tier_outlines,
             tier_tolerances={str(i): {'1': s.value(), '2': self.tier2_tolerances[i].value()}
                              for i, s in self.tolerances.items()},
@@ -420,7 +431,9 @@ class TieredPanel(UncertaintyPanel):
             resolution=self.resolution.currentData(), mesh_density=self.mesh_density.currentData(),
             date=self.gui._date.isoformat(), sampling=self.sampling.currentData(),
             broad_fraction=self.broad_fraction.value()/100., history_path=str(DEFAULT_HISTORY),
-            image_identity=payload['images'], running_difference=bool(self.gui._runndiff),
+            image_identity=payload['images'], views=payload['views'],
+            observations=payload['observations'],
+            running_difference=bool(self.gui._runndiff),
             geometry_mesh=dict(straight=STRAIGHT*self.mesh_density.currentData(),
                                front=FRONT*self.mesh_density.currentData(), circle=CIRCLE*self.mesh_density.currentData()),
             acceptance_rule=payload['rule'],
@@ -432,7 +445,7 @@ class TieredPanel(UncertaintyPanel):
         for c in checks:
             error = baseline[c['key']]
             lines.append('{} Tier {}: {:.5f} / {:.5f} (+{:.5f})'.format(
-                self.gui._spacecraft[c['view']],c['tier'],error,error+c['allowance'],c['allowance']))
+                self.gui._view_labels[c['view']],c['tier'],error,error+c['allowance'],c['allowance']))
         return lines
 
     def preview(self):
@@ -442,6 +455,8 @@ class TieredPanel(UncertaintyPanel):
             images = {c['view']:self.gui._images[c['view']] for c in checks}
             b = project_boundaries(config['reference'],self.gui._date,images,config['resolution'],config['mesh_density'])
             baseline = {c['key']:check_error(c,b[c['view']]) for c in checks}
+            b = display_boundaries(config['reference'], self.gui._date, dict(enumerate(self.gui._images)),
+                config['resolution'], config['mesh_density'], existing=b)
             self.invalidate()
             for view,xy in b.items():
                 self.overlays.append(self.gui._axes[view].plot(xy[:,0],xy[:,1],'.',
@@ -470,7 +485,8 @@ class TieredPanel(UncertaintyPanel):
         self.invalidate()
         self.set_running(True)
         images = {c['view']:self.gui._images[c['view']] for c in checks}
-        self.worker = SearchWorker(config,images,self.gui._date,self.gui)
+        self.worker = SearchWorker(config,images,self.gui._date,self.gui,
+                                   display_images=dict(enumerate(self.gui._images)))
         self.begin_live_histograms(config)
         self.worker.progress.connect(self.set_search_status)
         self.worker.preview_ready.connect(self.queue_preview)

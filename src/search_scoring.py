@@ -8,9 +8,9 @@ import os
 import numpy as np
 from astropy import units as u
 
-from geometry import gcs_mesh_sunpy
-from outline_uncertainty import PARAMETERS, surface_faces, silhouette_boundary
-from tiered_outlines import prepare_checks, check_errors, passes_checks
+from .geometry import gcs_mesh_sunpy
+from .outline_uncertainty import PARAMETERS, surface_faces, silhouette_boundary
+from .tiered_outlines import prepare_checks, check_errors, passes_checks
 
 # Independent of the display mesh: scoring must not change with display mode.
 STRAIGHT, FRONT, CIRCLE = 10, 24, 48
@@ -30,7 +30,25 @@ def project_boundaries(parameters, date, images, resolution, density=1):
     return dict(iter_projected_boundaries(parameters, date, images, resolution, density))
 
 
-def iter_projected_boundaries(parameters, date, images, resolution, density=1):
+def display_boundaries(parameters, date, images, resolution, density=1, existing=None, cancelled=None):
+    """Complete a preview in other views without adding acceptance checks.
+
+    Reuse silhouettes already calculated while scoring. A model completely outside
+    an untraced image can have no visible silhouette there; it still remains an
+    accepted fit when all of the actual outline checks pass.
+    """
+    boundaries = dict(existing or {})
+    missing = {view: image for view, image in images.items() if view not in boundaries}
+    if missing:
+        try:
+            boundaries.update(iter_projected_boundaries(parameters, date, missing, resolution, density,
+                skip_invalid=True, cancelled=cancelled))
+        except (ValueError, FloatingPointError):
+            pass
+    return boundaries
+
+
+def iter_projected_boundaries(parameters, date, images, resolution, density=1, skip_invalid=False, cancelled=None):
     """Project one view at a time so a rejected fit can stop before later views."""
     straight, front, circle = STRAIGHT * density, FRONT * density, CIRCLE * density
     faces = FACES if density == 1 else surface_faces((front + straight) * 2 - 3, circle)
@@ -39,10 +57,17 @@ def iter_projected_boundaries(parameters, date, images, resolution, density=1):
                          parameters['kappa'], np.deg2rad(parameters['lat']),
                          np.deg2rad(parameters['lon']), np.deg2rad(parameters['tilt']))
     for index, image in images.items():
-        x, y = image.world_to_pixel(mesh.transform_to(image.coordinate_frame))
-        yield index, silhouette_boundary(
-            np.column_stack((x.to_value(u.pix), y.to_value(u.pix))),
-            faces, image.data.shape, resolution)
+        if cancelled is not None and cancelled.is_set():
+            return
+        try:
+            x, y = image.world_to_pixel(mesh.transform_to(image.coordinate_frame))
+            boundary = silhouette_boundary(np.column_stack((x.to_value(u.pix), y.to_value(u.pix))),
+                                           faces, image.data.shape, resolution)
+        except (ValueError, FloatingPointError):
+            if skip_invalid:
+                continue
+            raise
+        yield index, boundary
 
 
 def score_candidate(row, config, images, date, checks, baseline, project=None):
