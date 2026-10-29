@@ -85,6 +85,10 @@ outlines for visual comparison, without imposing acceptance checks.
 
 Use toolbar pan/zoom for individual plots. **Pinch** zooms the whole figure page;
 **two-finger scrolling** moves around it. **Fit page** restores the overview.
+The **Images** tab has independent **Brightness** and **Contrast** sliders and
+number boxes for each view. **Reset this image** restores its original display.
+These settings stay available during a search and are saved with each time step;
+they change the display without changing image data, traces or accepted fits.
 
 ## Read the results
 

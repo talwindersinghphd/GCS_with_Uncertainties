@@ -21,7 +21,7 @@ from .search_scoring import (STRAIGHT, FRONT, CIRCLE, project_boundaries, displa
 from .utils.widgets import SearchStatusLabel, CompactDoubleSpinBox
 from .outline_preview import OutlinePreview
 
-DEFAULT_MAX_PROPOSALS = 65536
+DEFAULT_MAX_PROPOSALS = 262144
 LIVE_PREVIEW_INTERVAL_MS = 1000
 LIVE_HISTOGRAM_INTERVAL_MS = 1000
 ACCEPTED_OUTLINE_STYLE = dict(color='#e779a5', alpha=.25, ms=1)
@@ -450,7 +450,8 @@ class UncertaintyPanel:
         self.target_accepted.setRange(1, DEFAULT_MAX_PROPOSALS)
         self.target_accepted.setValue(512)
         self.target_accepted.setToolTip('Stop after this many distinct fits are accepted in candidate order. '
-                                       'The default safety limit is 65,536 proposals; partial results can be saved.')
+                                       'The default safety limit is {:,} proposals; partial results can be saved.'
+                                       .format(DEFAULT_MAX_PROPOSALS))
         cpu_form.addRow('Target accepted fits', self.target_accepted)
         cpu_form.addRow('History-guided', self.guided_fraction)
         cpu_form.addRow('Broad search', self.broad_fraction)

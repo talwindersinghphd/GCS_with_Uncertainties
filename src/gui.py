@@ -24,6 +24,7 @@ from .geometry import gcs_mesh_sunpy, apex_radius
 from .utils.helioviewer import get_helioviewer_client
 from .utils.widgets import SliderAndTextbox
 from .utils.figure_page import FigurePage
+from .utils.image_display import ImageDisplayControl
 from .tiered_gui import TieredPanel as UncertaintyPanel
 from .uncertainty_gui import export_result
 from .parameter_histograms import draw_parameter_histograms
@@ -515,11 +516,47 @@ class GCSGui(QtWidgets.QMainWindow):
         self._figure_tabs.currentChanged.connect(self.activate_figure_tab)
         self.activate_figure_tab(0)
         self._current_draw_mode = None
+        self._image_controls = []
 
         self.create_widgets(date)
 
         self.make_plot()
+        self.create_image_controls()
         self.show()
+
+    def create_image_controls(self):
+        controls = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(controls)
+        note = QtWidgets.QLabel('Adjust each image independently. Save keeps these settings for this time.')
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        for index, (label, artist) in enumerate(zip(self._view_labels, self._image_artists)):
+            control = ImageDisplayControl('{}. {}'.format(index + 1, label), artist, self._figure.canvas)
+            self._image_controls.append(control)
+            layout.addWidget(control)
+        save = QtWidgets.QPushButton('Save')
+        save.clicked.connect(self.save)
+        self._uncertainty.edit_controls.append(save)
+        layout.addWidget(save)
+        layout.addStretch(1)
+        self._image_tab = QtWidgets.QScrollArea()
+        self._image_tab.setWidgetResizable(True)
+        self._image_tab.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self._image_tab.setWidget(controls)
+        self._control_tabs.addTab(self._image_tab, 'Images')
+
+    def image_display_settings(self):
+        return [control.settings() for control in self._image_controls]
+
+    def restore_image_display(self, settings):
+        if settings is None:
+            settings = [dict(brightness=0, contrast=100) for _ in self._image_controls]
+        if not isinstance(settings, list) or len(settings) != len(self._image_controls):
+            raise ValueError('Image display settings must match the observation views.')
+        for values in settings:
+            ImageDisplayControl.validate_settings(values)
+        for control, values in zip(self._image_controls, settings):
+            control.set_settings(values)
 
     def activate_figure_tab(self, index):
         for i, toolbar in enumerate(self._figure_toolbars):
@@ -653,6 +690,7 @@ class GCSGui(QtWidgets.QMainWindow):
         axes = []
         images = []
         self._mesh_plots = []
+        self._image_artists = []
         for i, (sc, detector) in enumerate(zip(spacecraft, self._view_detectors)):
             image = self._provided_images[i] if self._provided_images is not None else load_image(sc, detector, date, runndiff)
             images.append(image)
@@ -683,14 +721,15 @@ class GCSGui(QtWidgets.QMainWindow):
                 labelbottom = False, bottom = False)
 
             axes.append(ax)
-            if detector == 'HI':
-                image.plot(axes=ax,annotate=False, cmap='Greys_r', norm=colors.Normalize(vmin=-0.5, vmax=0.5) if runndiff else None)
-            elif detector == 'COR2beacon' and sc == 'STA':
-                image.plot(axes=ax,annotate=False, cmap='Greys_r', norm=colors.Normalize(vmin=np.mean(image)-2*np.std(image), vmax=np.mean(image)+2*np.std(image)) if runndiff else None)
-            elif detector == 'COR2beacon' and sc == 'STB':
-                image.plot(axes=ax,annotate=False, cmap='Greys_r', norm=colors.Normalize(vmin=np.mean(image)-2*np.std(image), vmax=np.mean(image)+2*np.std(image)) if runndiff else None)
-            else:
-                image.plot(axes=ax,annotate=False, cmap='Greys_r', norm=colors.Normalize(vmin=np.mean(image)-4*np.std(image), vmax=np.mean(image)+4*np.std(image)) if runndiff else None)
+            norm = None
+            if runndiff:
+                if detector == 'HI':
+                    norm = colors.Normalize(vmin=-0.5, vmax=0.5)
+                else:
+                    width = (2 if detector == 'COR2beacon' else 4) * np.std(image.data)
+                    centre = np.mean(image.data)
+                    norm = colors.Normalize(vmin=centre - width, vmax=centre + width)
+            self._image_artists.append(image.plot(axes=ax, annotate=False, cmap='Greys_r', norm=norm))
 
         self._bg = fig.canvas.copy_from_bbox(fig.bbox)
         self._images = images

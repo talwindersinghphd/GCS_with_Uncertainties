@@ -293,6 +293,7 @@ class TieredPanel(UncertaintyPanel):
             views=[dict(spacecraft=sc, coronagraph=detector) for sc, detector in
                    zip(self.gui._spacecraft, self.gui._view_detectors)],
             reference=self.gui.get_params_dict(), tier_outlines=self.tier_outlines,
+            image_display=self.gui.image_display_settings(),
             tier_tolerances={str(i): {'1': s.value(), '2': self.tier2_tolerances[i].value()}
                              for i, s in self.tolerances.items()},
             search_settings=dict(scales={k:s.value() for k,s in self.scales.items()},
@@ -378,6 +379,7 @@ class TieredPanel(UncertaintyPanel):
         for key,value in search.get('scales',{}).items():
             if key not in self.scales or not np.isfinite(value) or not self.scales[key].minimum() <= value <= self.scales[key].maximum():
                 raise ValueError('Invalid saved search scale.')
+        self.gui.restore_image_display(payload.get('image_display'))
         self.outlines = {}
         for artist in self.lines.values():
             artist.remove()

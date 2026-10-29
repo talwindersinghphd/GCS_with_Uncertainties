@@ -38,7 +38,7 @@ Tier 1 copy. Review its confidence assignments before saving.
    once the first requested number of accepted candidates is known in proposal
    order; the remainder of the batch is not evaluated. Fits already running can
    finish, but later matches are excluded so the retained count stays at the target.
-   The default proposal budget is 65,536; hitting it before the target is
+   The default proposal budget is 262,144; hitting it before the target is
    reported as a partial result. During the run, the button becomes **Cancel search** and fit
    and outline editing is disabled. Cancelling stops new fits, lets fits already
    running finish, and retains the partial results.
@@ -76,6 +76,14 @@ changing the mix to preserve a run for comparison. Changing either percentage
 clears the previous results and histograms; rerun to see the new distributions.
 Broad search uses the current ranges around the manual fit. History guides angular
 offsets; shape parameters remain broad, and retries/filtering can change the actual mix.
+
+The **Images** tab provides separate brightness and contrast controls for every
+observation view. Use the sliders or enter percentages; brightness 0% and contrast
+100% keep the original display. **Reset this image** restores both defaults for that
+view. Adjustments remain available while searching and preserve the original image
+data, traced coordinates and accepted fits. **Save** stores them for the current
+time step and updates the exported figures. Older sessions start with the original
+display settings.
 
 Scales and the multiplier are editable in the compact **Uncertainty** tab and
 persist with the session. Run, Save and progress are pinned below the settings;

@@ -84,8 +84,8 @@ def persist(window):
             export = window.saved_search[1]
         else:
             export = export_result(panel.result, folder)
-            window.save_search_figures(export)
             window.saved_search = panel.result, export
+        window.save_search_figures(export)
     write_json(folder / 'manual_fit.json', dict(date=utc_string(window._date),
         parameters=window.get_params_dict(), note='User manual fit; not an automated best-fit estimate.'))
     write_json(folder / 'manual_traces.json', annotations)
