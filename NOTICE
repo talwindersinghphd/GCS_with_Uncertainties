@@ -4,7 +4,6 @@ The manual GUI and GCS geometry derive from:
   Johan von Forstner: https://github.com/johan12345/gcs_python
   Copyright (c) 2020 Johan von Forstner, MIT License.
 
-The upstream MIT notice is preserved in LICENSES/gcs_python-MIT.txt.
 The original Python geometry is based on the SolarSoft GCS routines and the
 Thernisien graduated cylindrical shell model, as noted in src/geometry.py.
 
