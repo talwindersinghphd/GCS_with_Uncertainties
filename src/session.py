@@ -26,6 +26,8 @@ def annotation_signature(payload):
                                           'tier_tolerances', 'search_settings')}
     inputs['search_settings'] = dict(inputs['search_settings'])
     inputs['search_settings'].pop('cpus', None)
+    if 'allowance_mode' in payload:
+        inputs['allowance_mode'] = payload['allowance_mode']
     return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
 
 
@@ -61,7 +63,11 @@ def restore_search(window):
     state = json.loads(state_file.read_text())
     export = state.get('search_export')
     panel = window._uncertainty
-    if export and state.get('annotation_signature') == annotation_signature(panel.annotation_payload()):
+    current = annotation_signature(panel.annotation_payload())
+    original, converted = getattr(window, 'restored_annotation_signatures', (None, None))
+    matches = (state.get('annotation_signature') == current or
+               (state.get('annotation_signature') == original and current == converted))
+    if export and matches:
         folder = (window.session_folder / export).resolve()
         if folder.parent != window.session_folder.resolve():
             raise ValueError('Saved search path must stay within its time-step folder.')

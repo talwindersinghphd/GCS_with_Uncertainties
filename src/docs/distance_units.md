@@ -18,33 +18,40 @@ observer distance via the WCS. Each observer has their own projected plane. It d
 not recover a 3D distance to the observed CME material. `DSUN_OBS` must be finite
 and in metres; missing geometry is an error, not an assumed Earth distance.
 
-Every view/tier still uses its own manual-fit baseline plus its additional
-allowance. There is no absolute error cap. Fresh session defaults are +0.05 RSun
-for Tier 1 and +0.20 RSun for Tier 2; both are editable starting values.
+Every view/tier uses its own manual-fit baseline multiplied by
+`1 + extra_percent / 100`. Fresh session defaults are 10% for Tier 1 and 20% for
+Tier 2; both are editable starting values. RMS values remain in projected solar radii.
 Physical units standardize the distance scale, not image quality or outline clarity.
 The mesh and silhouette raster are still discretized; compare higher resolutions
 when the extra allowances approach the numerical boundary uncertainty.
 
 ## Saved annotations and old searches
 
-Version 3 keeps annotation coordinates in native image pixels, with an explicit
-coordinate-unit tag, but stores allowances and scoring geometry in projected solar
-radii. Images and metadata must still match exactly. Migration provenance records
-the original pixel allowances and conversion factors. Reloading version 3 never
-converts its allowances a second time.
+Version 4 keeps annotation coordinates in native image pixels, explicitly tags
+`allowance_mode: percent_of_manual_rms`, and retains scoring geometry in projected
+solar radii. Images and metadata must still match exactly. Version-3 additive
+allowances convert to `100 * absolute_allowance_rsun / manual_rms` for each traced
+view/tier, using its saved manual parameters, mesh and raster resolution. The
+threshold is preserved and the conversion is recorded. Reloading version 4 never
+converts its allowances again. A positive additive allowance with exactly zero
+manual RMS cannot be represented as a finite percentage and requires a new session.
 
 For version 2, a scalar pixel allowance converts exactly only when the pixel-to-plane
 mapping is an isotropic similarity. The loader checks scale isotropy and linearity
 across the image; it rejects migration for unequal scales or nonlinear mappings
 instead of guessing an average. Version 1 has no stored allowances, so the current
-physical defaults apply. Loading does not overwrite the original files.
+percentage defaults apply. Loading does not overwrite the original files.
 
 The bundled July 12 annotations already use version 3 and physical-distance
-allowances. Saved search results are never relabelled. Old configurations without
-`score_unit` continue to mean native pixels for reproducibility. To run
-physical scoring programmatically, specify `projected_solar_radii`, supply the maps,
-and express all allowances in solar radii.
+allowances; the GUI converts these to equivalent percentages on load. Saved search
+results are never relabelled. Old configurations without `score_unit` continue to
+mean native pixels, and configurations without `allowance_mode` retain additive
+allowances. To use current scoring programmatically, specify
+`score_unit: projected_solar_radii` and `allowance_mode: percent_of_manual_rms`,
+supply the maps, and express the allowances as percentages.
 
 New exports identify errors as `projected_solar_radii` in JSON and NPZ metadata,
 use `rms_rsun_*` CSV columns and retain D, the fixed solar radius and projection
-definition. Legacy pixel search exports keep `rms_px_*` columns.
+definition. Score components also record the allowance mode, manual RMS and allowed
+RMS, so the percentage and physical threshold are explicit. Legacy pixel search
+exports keep `rms_px_*` columns.

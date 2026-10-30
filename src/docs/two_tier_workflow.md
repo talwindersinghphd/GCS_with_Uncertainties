@@ -25,10 +25,11 @@ Tier 1 copy. Review its confidence assignments before saving.
    that stay fixed as you edit. Height, half-angle and κ have no historical entry
    and start from exploratory defaults. The multiplier remains editable, with
    search half-width = scale × multiplier. There is no preset selector.
-   Set **Extra RMS allowance [RSun]** separately for each view and tier: a candidate
-   passes if its RMS is no greater than the manual RMS plus this allowance.
-   Fresh defaults are 0.05 for Tier 1 and 0.20 for Tier 2, in projected solar radii.
-   Saved values are restored; **Defaults** applies 0.05 / 0.20 to every view.
+   Set **Extra RMS [% of manual]** separately for each view and tier: a candidate
+   passes if its RMS is no greater than **manual RMS × (1 + extra % / 100)**.
+   For example, 10% permits an RMS up to 1.10 times that component's manual RMS.
+   Fresh defaults are 10% for Tier 1 and 20% for Tier 2.
+   Saved values are restored; **Defaults** applies 10% / 20% to every view.
    Set **CPUs to use**, **Target accepted fits**, and the linked **History-guided** /
    **Broad search** percentages, then choose **Run uncertainty search**.
    Defaults are up to 4 CPUs, 512 fits, and a 70% history / 30% broad mix;
@@ -90,18 +91,25 @@ persist with the session. Run, Save and progress are pinned below the settings;
 only the settings scroll when space is limited. Batch size, resolution,
 scoring and separate export controls remain internal. There is no **Move arc** button;
 use segment assignment to change tiers.
+Mouse-wheel and trackpad scrolling over input fields, closed dropdowns or sliders
+moves the panel without changing their values, even when a field has focus.
+Typing, keyboard arrows, spin-box arrow buttons and slider dragging still edit settings.
 
-Default extra allowances are +0.05 projected solar radii for Tier 1 and +0.20 for Tier 2. They
-are editable starting values, not measured statistical uncertainties. There is no
-absolute outline-error cap. If both tiers are used in a view, Tier 2 must have at
-least as much additional flexibility as Tier 1.
+Default extra allowances are 10% of the manual RMS for Tier 1 and 20% for Tier 2.
+They are editable search tolerances, not measured statistical uncertainties. Each
+view/tier has its own percentage and baseline. A zero manual RMS permits only a
+zero candidate RMS; no extra absolute floor is added.
 
-Version-3 annotation files record solar-radius units and distance geometry and preserve both tiers, disconnected arcs, exact image
-identities, the manual reference and search settings. Original example fixtures
-are not overwritten. Old version-1 and version-2 annotations remain readable. Saved pixel allowances
+Version-4 annotation files explicitly tag percentage allowances and retain physical
+RMS units, distance geometry, both tiers, disconnected arcs, exact image identities,
+the manual reference and search settings. Older version-3 absolute allowances are
+converted using each traced component's saved manual RMS at its saved scoring
+resolution, preserving its acceptance threshold. Untraced components use fresh
+percentage defaults. Saved searches retain their original acceptance rules and rows.
+Original example fixtures are not overwritten. Old version-1 and version-2 annotations remain readable. Saved pixel allowances
 are converted per image only when its WCS is an exact isotropic similarity in the
 projected plane. Otherwise loading asks for a new physical-distance session;
-no average pixel scale is guessed. Migration provenance is saved in version 3.
+no average pixel scale is guessed. Migration provenance is saved in version 4.
 The original annotation files are not changed by loading them.
 
 Search exports include separate error columns such as `rms_rsun_view_0_tier_1` and

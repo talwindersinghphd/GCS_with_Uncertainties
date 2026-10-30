@@ -22,7 +22,7 @@ from sunpy.map import Map
 
 from .geometry import gcs_mesh_sunpy, apex_radius
 from .utils.helioviewer import get_helioviewer_client
-from .utils.widgets import SliderAndTextbox
+from .utils.widgets import SliderAndTextbox, PanelWheelFilter
 from .utils.figure_page import FigurePage
 from .utils.image_display import ImageDisplayControl
 from .tiered_gui import TieredPanel as UncertaintyPanel
@@ -460,6 +460,7 @@ class GCSGui(QtWidgets.QMainWindow):
             detector_stereo: str = 'COR2', detector_soho='C2', detector_histereo ='HI',
             view_detectors=None, images=None, initial_parameters=None, observations=None):
         super().__init__()
+        self._panel_wheel_filter = PanelWheelFilter(self)
         self.setWindowTitle(APP_NAME)
         # Qt 5's macOS font kerning can hide spaces after punctuation.
         font = self.font()

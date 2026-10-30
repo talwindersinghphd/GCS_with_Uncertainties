@@ -33,13 +33,18 @@ preserve the one-way metric, mesh/raster resolution and acceptance rule.
 For every populated view/tier component, accept only when:
 
 ```text
-E(candidate, view, tier) <= E(manual, view, tier) + allowance(view, tier)
+E(candidate, view, tier) <= E(manual, view, tier) * (1 + extra_percent(view, tier) / 100)
 ```
 
 All components must pass independently. There is no absolute error cap and no
 requirement that even a clear boundary be exactly representable by GCS geometry.
-The clear tier receives a smaller additional allowance than the uncertain tier.
-These allowances are user choices, not automatically calibrated standard deviations.
+The fresh defaults are 10% for the clear tier and 20% for the uncertain tier.
+For example, a manual RMS of 0.05 RSun and 10% extra permits 0.055 RSun.
+Each percentage is a user choice, not an automatically calibrated standard deviation.
+A zero manual RMS permits only a zero candidate RMS. The manual fit is the user's
+reference; the software does not assume it is a global optimum. RMS baselines stay
+frozen throughout a search and are recomputed for the current manual fit on a new run.
+Old configurations without an allowance-mode tag retain additive allowances.
 
 ## Historical proposals
 
@@ -68,8 +73,9 @@ has no events with two complete four-parameter reconstructions.
 - Widen search bounds if compatible candidates approach their edges.
 - Compare broad-only and mixed proposals, seeds, and sample sizes.
 - Check mesh and raster resolution, especially for small allowances.
-- Outline scores and extra allowances are in projected solar radii, independent of
-  pixel scale. Different boundary clarity can still require different allowances.
+- Outline scores are in projected solar radii, independent of pixel scale; extra
+  allowances are percentages of each component's manual score. Different boundary
+  clarity can still require different percentages.
   The rasterized silhouette retains finite resolution, so numerical convergence
   must still be checked.
 - Compatibility ranges are conditional on the drawn arcs, the GCS shape family,

@@ -77,11 +77,14 @@ views, time and background.
 | --- | --- |
 | Scale × multiplier | Search ± this range around the manual fit; zero fixes a parameter. |
 | History-guided / Broad search | Mix historical angular differences with broad sampling of your ranges. Percentages sum to 100%. |
-| Extra RMS allowance | Additional outline mismatch allowed above the manual RMS, separately for each traced view/tier. Defaults: **0.05 RSun / 0.20 RSun** for Tier 1 / Tier 2. |
+| Extra RMS [% of manual] | Percentage above each traced view/tier's manual RMS. **10%** permits **1.10 × manual RMS**. Fresh defaults: **10% / 20%** for Tier 1 / Tier 2. |
 
-Each traced view/tier must satisfy **candidate RMS ≤ manual RMS + allowance**.
-RSun denotes projected solar radii. Untraced views show the model and accepted
+Each traced view/tier must satisfy **candidate RMS ≤ manual RMS × (1 + extra % / 100)**.
+For example, manual RMS **0.05 RSun** with **10%** allows **0.055 RSun**.
+RMS distances remain in projected solar radii (RSun). Untraced views show the model and accepted
 outlines for visual comparison, without imposing acceptance checks.
+Older saved absolute allowances are converted using their saved manual RMS to
+preserve the same thresholds. **Defaults** applies 10% / 20% to every view.
 
 Use toolbar pan/zoom for individual plots. **Pinch** zooms the whole figure page;
 **two-finger scrolling** moves around it. **Fit page** restores the overview.
@@ -89,13 +92,15 @@ The **Images** tab has independent **Brightness** and **Contrast** sliders and
 number boxes for each view. **Reset this image** restores its original display.
 These settings stay available during a search and are saved with each time step;
 they change the display without changing image data, traces or accepted fits.
+Scrolling over a number field, dropdown or slider scrolls its panel without
+changing the setting. Edit values by typing, using arrow buttons, or dragging sliders.
 
 ## Read the results
 
 ![Latest July 12 fit: traced boundaries, manual GCS model, accepted outlines, and a red SOHO C2 time warning](src/docs/images/july12_latest_outlines.png)
 
 This July 12, 2012 example has **512 accepted fits**, constrained by STA/STB
-outlines; 20 are shown. This run used **0.10 / 0.20 RSun**
+outlines; 20 are shown. This historical run used **0.10 / 0.20 RSun** additive
 allowances for Tier 1 / Tier 2.
 
 **Red SOHO C2:** requested **17:54 UTC**, closest image **17:12:06 UTC**—**41.9

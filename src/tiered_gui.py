@@ -8,7 +8,8 @@ from PyQt5 import QtCore, QtWidgets
 from .uncertainty_gui import (UncertaintyPanel, SearchWorker, candidate_design,
     project_boundaries, display_boundaries, PARAMETERS, STRAIGHT, FRONT, CIRCLE, DEFAULT_HISTORY,
     DEFAULT_MAX_PROPOSALS, completion_status, MANUAL_OUTLINE_STYLE)
-from .tiered_outlines import TIERS, COLORS, prepare_checks, check_error, move_segment
+from .tiered_outlines import (TIERS, COLORS, prepare_checks, check_error, move_segment,
+    allowed_rms, allowance_mode, PERCENT_ALLOWANCE, ABSOLUTE_ALLOWANCE, DEFAULT_ALLOWANCES)
 from .utils.widgets import CompactDoubleSpinBox
 
 
@@ -63,12 +64,13 @@ class TieredPanel(UncertaintyPanel):
         self.tier2_tolerances = {}
         for i, sc in enumerate(gui._view_labels):
             spin = CompactDoubleSpinBox()
-            spin.setRange(0, 100)
+            spin.setRange(0, 1000000)
             spin.setDecimals(10)
-            spin.setSingleStep(.01)
-            spin.setValue(.20)
-            spin.setToolTip('Additional Tier 2 RMS allowed ABOVE YOUR MANUAL TIER 2 RMS, in projected solar radii. '
-                            '0.20 is an editable starting allowance, not a measured uncertainty.')
+            spin.setSingleStep(1)
+            spin.setSuffix('%')
+            spin.setValue(DEFAULT_ALLOWANCES['2'])
+            spin.setToolTip('Extra RMS as a percentage of this view\'s manual Tier 2 RMS. '
+                            '20% allows a candidate RMS up to 1.20 times that manual RMS.')
             self.tier2_tolerances[i] = spin
             spin.valueChanged.connect(self.invalidate)
         self.allowance_control = QtWidgets.QWidget()
@@ -76,13 +78,13 @@ class TieredPanel(UncertaintyPanel):
         allowance_layout.setContentsMargins(0, 0, 0, 0)
         allowance_layout.setSpacing(3)
         heading = QtWidgets.QHBoxLayout()
-        title = QtWidgets.QLabel('Extra RMS allowance [RSun]')
+        title = QtWidgets.QLabel('Extra RMS [% of manual]')
         font = title.font()
         font.setBold(True)
         title.setFont(font)
         heading.addWidget(title)
         self.allowance_defaults = QtWidgets.QPushButton('Defaults')
-        self.allowance_defaults.setToolTip('Set every view to +0.05 solar radii for Tier 1 and +0.20 for Tier 2.')
+        self.allowance_defaults.setToolTip('Set every view to +10% of manual RMS for Tier 1 and +20% for Tier 2.')
         self.allowance_defaults.clicked.connect(self.reset_allowances)
         heading.addWidget(self.allowance_defaults)
         allowance_layout.addLayout(heading)
@@ -96,16 +98,15 @@ class TieredPanel(UncertaintyPanel):
         for row, sc in enumerate(gui._view_labels, 1):
             allowances.addWidget(QtWidgets.QLabel(sc), row, 0)
             for column, spin in enumerate((self.tolerances[row - 1], self.tier2_tolerances[row - 1]), 1):
-                spin.setFixedWidth(spin.fontMetrics().horizontalAdvance('0.0000') + 27)
+                spin.setFixedWidth(spin.fontMetrics().horizontalAdvance('100.0%') + 27)
                 allowances.addWidget(spin, row, column)
                 spin.show()
         allowance_layout.addLayout(allowances)
         self.allowance_help = QtWidgets.QLabel(
-            '<b>Candidate RMS ≤ manual RMS + allowance.</b><br><br>'
-            '<b>Extra RMS allowance:</b> How much more outline mismatch to allow above your manual fit, '
-            'in projected solar radii (RSun). Larger values are more permissive; smaller values are '
-            'stricter. Each traced view and tier must pass separately.<br><br>'
-            'Defaults: Tier 1 = 0.05 RSun; Tier 2 = 0.20 RSun. These are adjustable search tolerances.')
+            '<b>Candidate RMS ≤ manual RMS × (1 + extra % / 100).</b><br><br>'
+            '10% allows up to 1.10 times the RMS of your manual fit. Each traced view and tier uses '
+            'its own manual RMS and must pass separately. Larger percentages are more permissive.<br><br>'
+            'Defaults: Tier 1 = 10%; Tier 2 = 20%. At zero manual RMS, only zero candidate RMS passes.')
         self.allowance_help.setWordWrap(True)
         policy = self.allowance_help.sizePolicy()
         policy.setHorizontalPolicy(QtWidgets.QSizePolicy.Ignored)
@@ -121,9 +122,9 @@ class TieredPanel(UncertaintyPanel):
 
     def reset_allowances(self):
         for spin in self.tolerances.values():
-            spin.setValue(.05)
+            spin.setValue(DEFAULT_ALLOWANCES['1'])
         for spin in self.tier2_tolerances.values():
-            spin.setValue(.20)
+            spin.setValue(DEFAULT_ALLOWANCES['2'])
 
     def invalidate(self, *args):
         super().invalidate(*args)
@@ -285,7 +286,7 @@ class TieredPanel(UncertaintyPanel):
 
     def annotation_payload(self):
         self.import_legacy()
-        return dict(format='gcs-outlines-v3', score_unit=PHYSICAL_UNIT,
+        return dict(format='gcs-outlines-v4', score_unit=PHYSICAL_UNIT, allowance_mode=PERCENT_ALLOWANCE,
             outline_coordinate_unit='native_image_pixels',
             distance_geometry={str(i): ProjectedDistance(image).provenance() for i,image in enumerate(self.gui._images)},
             migration=self.annotation_migration, images=self.image_identity(),
@@ -302,7 +303,7 @@ class TieredPanel(UncertaintyPanel):
                 target_accepted=self.target_accepted.value(),
                 resolution=self.resolution.currentData(), mesh_density=self.mesh_density.currentData(),
                 sampling=self.sampling.currentData(), broad_fraction=self.broad_fraction.value()),
-            rule='Each view/tier RMS <= the frozen manual view/tier RMS + its additional allowance. No absolute cap.')
+            rule='Each view/tier RMS <= its frozen manual RMS * (1 + extra_percent / 100).')
 
     def save_traces(self):
         filename, _ = QtWidgets.QFileDialog.getSaveFileName(self.gui, 'Save tiered traces and manual fit',
@@ -315,7 +316,7 @@ class TieredPanel(UncertaintyPanel):
                 QtWidgets.QMessageBox.warning(self.gui,'Cannot save traces',str(exc))
 
     def restore_annotations(self, payload):
-        if payload.get('format') not in ('gcs-outlines-v1','gcs-outlines-v2','gcs-outlines-v3') or payload.get('images') != self.image_identity():
+        if payload.get('format') not in ('gcs-outlines-v1','gcs-outlines-v2','gcs-outlines-v3','gcs-outlines-v4') or payload.get('images') != self.image_identity():
             raise ValueError('Traces do not match these exact images and metadata, or the format is unsupported.')
         reference = payload['reference']
         if set(reference) != set(PARAMETERS):
@@ -338,15 +339,19 @@ class TieredPanel(UncertaintyPanel):
                     xy = np.asarray(arc,dtype=float)
                     if xy.ndim != 2 or xy.shape[1] != 2 or not np.isfinite(xy).all() or (xy < 0).any() or (xy[:,0] >= w).any() or (xy[:,1] >= h).any():
                         raise ValueError('Invalid or out-of-image annotation coordinates.')
-        physical = payload['format'] == 'gcs-outlines-v3'
+        percent = payload['format'] == 'gcs-outlines-v4'
+        if allowance_mode(payload) != (PERCENT_ALLOWANCE if percent else ABSOLUTE_ALLOWANCE):
+            raise ValueError('Saved allowance mode does not match its annotation version.')
+        physical = payload['format'] in ('gcs-outlines-v3', 'gcs-outlines-v4')
         if physical and (payload.get('score_unit') != PHYSICAL_UNIT or
                          payload.get('outline_coordinate_unit') != 'native_image_pixels'):
             raise ValueError('Unsupported saved outline coordinate or distance units.')
         settings = {str(v):dict(a) for v,a in payload.get('tier_tolerances',{}).items()}
-        # Validate legacy values before conversion and before mutating GUI state.
+        # Validate the saved units before conversion or changes to GUI state.
+        maximum_allowance = 1000000 if percent else (100 if physical else 1000)
         for view, allowances in settings.items():
             if int(view) not in self.tolerances or any(t not in TIERS or not np.isfinite(v) or
-                    not 0 <= v <= (100 if physical else 1000) for t,v in allowances.items()):
+                    not 0 <= v <= maximum_allowance for t,v in allowances.items()):
                 raise ValueError('Invalid saved tier allowance.')
         migration = payload.get('migration') if physical else None
         if not physical and settings:
@@ -358,9 +363,6 @@ class TieredPanel(UncertaintyPanel):
                              rsun_per_pixel=factors, original_tier_tolerances=payload['tier_tolerances'],
                              note='Exact similarity WCS conversion; coordinates and original files retained.')
 
-        for view, allowance in settings.items():
-            if int(view) not in self.tolerances or any(t not in TIERS or not np.isfinite(v) or not 0 <= v <= 100 for t,v in allowance.items()):
-                raise ValueError('Invalid tier allowance.')
         search = payload.get('search_settings',{})
         if 'cpus' in search and (not isinstance(search['cpus'], int) or search['cpus'] < 1):
             raise ValueError('Saved CPU count must be a positive integer.')
@@ -379,6 +381,37 @@ class TieredPanel(UncertaintyPanel):
         for key,value in search.get('scales',{}).items():
             if key not in self.scales or not np.isfinite(value) or not self.scales[key].minimum() <= value <= self.scales[key].maximum():
                 raise ValueError('Invalid saved search scale.')
+        if not percent and settings:
+            # Convert each old additive allowance using its own saved manual
+            # baseline and scoring resolution, preserving that RMS threshold.
+            images = dict(enumerate(self.gui._images))
+            absolute = {str(i): {'1': .05, '2': .20} for i in images}
+            for view, values in settings.items():
+                absolute[view].update(values)
+            config = dict(score_unit=PHYSICAL_UNIT, tier_outlines=tiers, tier_tolerances=absolute)
+            traced = any(len(arc) for groups in tiers.values() for arcs in groups.values() for arc in arcs)
+            checks = prepare_checks(config, images) if traced else []
+            boundaries = project_boundaries(reference, self.gui._date,
+                {c['view']: images[c['view']] for c in checks},
+                search.get('resolution', self.resolution.currentData()),
+                search.get('mesh_density', self.mesh_density.currentData())) if checks else {}
+            baseline = {c['key']: check_error(c, boundaries[c['view']]) for c in checks}
+            settings = {str(i): dict(DEFAULT_ALLOWANCES) for i in images}
+            for check in checks:
+                error = baseline[check['key']]
+                if not np.isfinite(error) or error < 0:
+                    raise ValueError('Saved manual RMS must be finite and nonnegative.')
+                if error == 0 and check['allowance'] > 0:
+                    raise ValueError('A positive absolute allowance with zero manual RMS cannot be converted '
+                                     'to a percentage. Choose percentage allowances in a new session.')
+                value = 100 * check['allowance'] / error if error else 0.
+                if not np.isfinite(value) or value > 1000000:
+                    raise ValueError('Converted RMS allowance exceeds the percentage control range.')
+                settings[str(check['view'])][check['tier']] = value
+            migration = dict(migration or {}, allowance_conversion=dict(
+                source_format=payload['format'], source_mode=ABSOLUTE_ALLOWANCE,
+                absolute_allowances_rsun=absolute, manual_rms=baseline,
+                conversion='extra_percent = 100 * absolute_allowance_rsun / saved_manual_rms'))
         self.gui.restore_image_display(payload.get('image_display'))
         self.outlines = {}
         for artist in self.lines.values():
@@ -387,6 +420,7 @@ class TieredPanel(UncertaintyPanel):
         self.annotation_migration = migration
         self.tier_outlines = tiers
         self.selected_arcs = {}
+        self.reset_allowances()
         for key,value in reference.items():
             getattr(self.gui,'_s_'+key).numbox.setValue(value)
         for view, allowance in settings.items():
@@ -409,7 +443,8 @@ class TieredPanel(UncertaintyPanel):
         self.refresh_arcs()
         self.invalidate()
         self.status.setText('Previous outlines loaded into Tier 1. Assign less-certain segments to Tier 2.'
-                            if legacy else 'Restored the manual fit and both outline tiers.')
+                            if legacy else 'Restored the manual fit and both outline tiers.' +
+                            (' Saved RMS allowances converted to equivalent percentages.' if not percent and settings else ''))
         return legacy
 
     def load_traces(self):
@@ -422,7 +457,8 @@ class TieredPanel(UncertaintyPanel):
 
     def make_config(self):
         payload = self.annotation_payload()
-        return dict(score_unit=PHYSICAL_UNIT, reference=payload['reference'], tier_outlines=payload['tier_outlines'],
+        return dict(score_unit=PHYSICAL_UNIT, allowance_mode=PERCENT_ALLOWANCE,
+            reference=payload['reference'], tier_outlines=payload['tier_outlines'],
             annotation_migration=payload['migration'],
             tier_tolerances=payload['tier_tolerances'],
             scales={k:s.value() for k,s in self.scales.items()}, scale_sources=self.scale_sources,
@@ -446,8 +482,9 @@ class TieredPanel(UncertaintyPanel):
         lines = ['Manual RMS / allowed RMS [projected RSun]:']
         for c in checks:
             error = baseline[c['key']]
-            lines.append('{} Tier {}: {:.5f} / {:.5f} (+{:.5f})'.format(
-                self.gui._view_labels[c['view']],c['tier'],error,error+c['allowance'],c['allowance']))
+            unit = '% of manual' if allowance_mode(c) == PERCENT_ALLOWANCE else ' RSun'
+            lines.append('{} Tier {}: {:.5f} / {:.5f} (+{:g}{})'.format(
+                self.gui._view_labels[c['view']], c['tier'], error, allowed_rms(c, error), c['allowance'], unit))
         return lines
 
     def preview(self):
@@ -464,7 +501,7 @@ class TieredPanel(UncertaintyPanel):
                 self.overlays.append(self.gui._axes[view].plot(xy[:,0],xy[:,1],'.',
                     scalex=False,scaley=False,**MANUAL_OUTLINE_STYLE)[0])
             self.report.setPlainText('\n'.join(self.describe_scores(baseline,checks)))
-            self.status.setText('Each tier uses its own manual baseline plus its own extra allowance. Both must pass separately.')
+            self.status.setText('Each tier allows its own selected percentage above its manual RMS. Both must pass separately.')
             self.gui._figure.canvas.draw_idle()
         except (ValueError,FloatingPointError) as exc:
             QtWidgets.QMessageBox.warning(self.gui,'Cannot score tiers',str(exc))
@@ -506,6 +543,8 @@ class TieredPanel(UncertaintyPanel):
         self.export_button.setEnabled(True)
         self.finish_overlay_preview(result)
         lines = self.describe_scores(result['reference_scores'],result['score_components'])
+        if allowance_mode(result['config']) == ABSOLUTE_ALLOWANCE:
+            lines.append('Saved search used absolute allowances; controls show equivalent percentages for its manual fit.')
         lines.append('Each view/tier must pass; good Tier 2 agreement cannot offset a Tier 1 failure.')
         lines.append('Parameter: manual | median | accepted min..max')
         for key,stats in result['summary'].items():

@@ -8,7 +8,8 @@ from .event_config import DEFAULT_PARAMETERS, utc_string
 from .example import bundled_annotations, matches_bundled
 from .gui import APP_NAME, GCSGui
 from .images import ImageLoader
-from .session import persist, restore_search
+from .session import persist, restore_search, annotation_signature
+from .tiered_outlines import PERCENT_ALLOWANCE
 
 
 class FrameWindow(GCSGui):
@@ -47,12 +48,19 @@ class FrameWindow(GCSGui):
             payload = next((item for item in candidates if item.get('images') == panel.image_identity()), None)
         if payload is not None:
             panel.restore_annotations(payload)
+            if all(key in payload for key in ('images', 'reference', 'tier_outlines',
+                                              'tier_tolerances', 'search_settings')):
+                self.restored_annotation_signatures = (annotation_signature(payload),
+                    annotation_signature(panel.annotation_payload()))
         elif warm:
             # Carry the fit and controls forward, never native-pixel trace coordinates.
             seed = panel.annotation_payload()
             seed['search_settings'] = warm['search_settings']
-            old_allowances = {(view['spacecraft'], view['coronagraph']): warm['tier_tolerances'][str(i)]
-                              for i, view in enumerate(warm['views'])}
+            # Old additive values from another time cannot be interpreted as
+            # percentages without that time's manual RMS. Use fresh defaults.
+            old_allowances = ({(view['spacecraft'], view['coronagraph']): warm['tier_tolerances'][str(i)]
+                               for i, view in enumerate(warm['views'])}
+                              if warm.get('allowance_mode') == PERCENT_ALLOWANCE else {})
             for i, view in enumerate(seed['views']):
                 key = view['spacecraft'], view['coronagraph']
                 if key in old_allowances:

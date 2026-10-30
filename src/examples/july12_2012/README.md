@@ -22,8 +22,11 @@ opens these fixtures with `python launch.py` from the project root. Edits are
 saved to ignored `sessions/july12_2012/frames/<UTC time>/`.
 
 The bundled annotations use `gcs-outlines-v3` with projected solar-radius units.
-The starting extra RMS allowances are +0.05 RSun for Tier 1 and +0.20 RSun for
-Tier 2 in each view. The half-angle search scale is 5.0° and the κ scale is 0.05.
+Its saved additive allowances are +0.05 RSun for Tier 1 and +0.20 RSun for
+Tier 2 in each view. The GUI converts them to equivalent percentages of each
+component's saved manual RMS; **Defaults** switches to 10% / 20%. New session
+annotations use version 4 with an explicit percentage tag. The original fixtures
+stay unchanged. The half-angle search scale is 5.0° and the κ scale is 0.05.
 All can be edited in Uncertainty and saved with the local session.
 
 Run an uncertainty search to generate accepted fits, live overlays and parameter

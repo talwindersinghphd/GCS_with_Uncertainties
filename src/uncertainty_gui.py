@@ -15,7 +15,8 @@ from .outline_uncertainty import (PARAMETERS, DEFAULT_SCALES, SCALE_SOURCES,
     resample_trace, outline_error,
     search_candidates, summarize)
 from .historical_sampling import guided_candidates, DEFAULT_HISTORY, load_history, suggested_scales
-from .tiered_outlines import prepare_checks, check_error
+from .tiered_outlines import (prepare_checks, check_error, allowed_rms, allowance_mode,
+    PERCENT_ALLOWANCE, DEFAULT_ALLOWANCES)
 from .search_scoring import (STRAIGHT, FRONT, CIRCLE, project_boundaries, display_boundaries,
     available_cpus, score_candidate, parallel_scores, create_scoring_pool)
 from .utils.widgets import SearchStatusLabel, CompactDoubleSpinBox
@@ -220,7 +221,10 @@ class SearchWorker(QtCore.QThread):
                           distance_unit=score_unit(c),
                           distance_geometry={str(i): ProjectedDistance(image).provenance()
                               for i, image in self.images.items()} if score_unit(c) == PHYSICAL_UNIT else {},
-                          score_components=[{k: check[k] for k in ('key', 'view', 'tier', 'allowance')} for check in checks],
+                          score_components=[dict(
+                              {k: check[k] for k in ('key', 'view', 'tier', 'allowance', 'allowance_mode')},
+                              manual_rms=baseline[check['key']],
+                              allowed_rms=allowed_rms(check, baseline[check['key']])) for check in checks],
                           invalid_geometry=invalid, projection_failures=projection_failures,
                           tested=tested, proposed=proposed, proposal_limit=budget,
                           duplicate_proposals=duplicates,
@@ -370,13 +374,14 @@ class UncertaintyPanel:
         self.tolerances = {}
         for i, sc in enumerate(gui._view_labels):
             spin = CompactDoubleSpinBox()
-            spin.setRange(0, 100)
+            spin.setRange(0, 1000000)
             spin.setDecimals(10)
-            spin.setSingleStep(.01)
-            spin.setValue(.05)
-            spin.setToolTip('Additional projected RMS distance above the manual fit, in solar radii. '
-                            '0.05 is an editable starting allowance, not a measured uncertainty.')
-            grid.addRow('{} {} allowance [RSun]'.format(i + 1, sc), spin)
+            spin.setSingleStep(1)
+            spin.setSuffix('%')
+            spin.setValue(DEFAULT_ALLOWANCES['1'])
+            spin.setToolTip('Extra RMS as a percentage of this view\'s manual RMS. '
+                            '10% allows a candidate RMS up to 1.10 times the manual RMS.')
+            grid.addRow('{} {} extra RMS [%]'.format(i + 1, sc), spin)
             self.tolerances[i] = spin
         self.exponent = QtWidgets.QSpinBox()
         self.exponent.setRange(6, 20)
@@ -903,7 +908,7 @@ class UncertaintyPanel:
                 metric = ProjectedDistance(self.gui._images[k])
                 error = outline_error(resample_trace(metric.transform(self.outlines[k])), metric.transform(xy))
                 lines.append('{}: {:.5f} / {:.5f}'.format(self.gui._view_labels[k], error,
-                                                        error + self.tolerances[k].value()))
+                    error * (1 + self.tolerances[k].value() / 100.)))
             boundaries = display_boundaries(self.gui.get_params_dict(), self.gui._date,
                 dict(enumerate(self.gui._images)), self.resolution.currentData(),
                 self.mesh_density.currentData(), existing=boundaries)
@@ -926,7 +931,8 @@ class UncertaintyPanel:
                 raise ValueError('Draw an outline with at least three points in one or more images.')
             for points in outlines.values():
                 resample_trace(points)
-            config = dict(score_unit=PHYSICAL_UNIT, reference=self.gui.get_params_dict(), outlines=outlines,
+            config = dict(score_unit=PHYSICAL_UNIT, allowance_mode=PERCENT_ALLOWANCE,
+                reference=self.gui.get_params_dict(), outlines=outlines,
                 scales={k: v.value() for k, v in self.scales.items()},
                 scale_sources=self.scale_sources, multiplier=self.multiplier.value(),
                 exponent=self.exponent.value(), seed=self.seed.value(),
@@ -1015,7 +1021,8 @@ class UncertaintyPanel:
             lines.append('History guides exploration. Accepted frequencies depend on the proposal mixture.')
         for k, e in result['reference_scores'].items():
             lines.append('{}: {:.5f} / {:.5f}'.format(self.gui._view_labels[k], e,
-                         e + result['config']['tolerances'][str(k)]))
+                allowed_rms(dict(allowance=result['config']['tolerances'][str(k)],
+                                 allowance_mode=allowance_mode(result['config'])), e)))
         lines.append('Parameter: manual | median | accepted min..max')
         for k, s in result['summary'].items():
             lines.append('{}: {:.3f} | {:.3f} | {:.3f}..{:.3f}'.format(
@@ -1072,6 +1079,8 @@ def export_result(result, root):
     metadata['units'] = dict(lat='degrees', lon='degrees modulo 360',
                              tilt='geometric degrees modulo 180', height='solar radii',
                              half_angle='degrees', kappa='dimensionless', errors=result.get('distance_unit', score_unit(result['config'])))
+    metadata['units']['allowance'] = (PERCENT_ALLOWANCE if allowance_mode(result['config']) == PERCENT_ALLOWANCE
+                                      else metadata['units']['errors'])
     if len(result['offsets']) > 1:
         metadata['parameter_order'] = list(PARAMETERS)
         metadata['accepted_offset_covariance'] = np.cov(result['offsets'], rowvar=False).tolist()

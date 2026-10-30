@@ -6,6 +6,23 @@ from .outline_uncertainty import resample_trace, outline_error
 
 TIERS = ('1', '2')
 COLORS = {'1': 'cyan', '2': '#ffcc33'}
+PERCENT_ALLOWANCE = 'percent_of_manual_rms'
+ABSOLUTE_ALLOWANCE = 'absolute'
+DEFAULT_ALLOWANCES = {'1': 10., '2': 20.}
+
+
+def allowance_mode(config):
+    # Untagged configurations retain their historical additive meaning.
+    mode = config.get('allowance_mode', ABSOLUTE_ALLOWANCE)
+    if mode not in (PERCENT_ALLOWANCE, ABSOLUTE_ALLOWANCE):
+        raise ValueError('Unknown RMS allowance mode: ' + str(mode))
+    return mode
+
+
+def allowed_rms(check, manual_rms):
+    if allowance_mode(check) == PERCENT_ALLOWANCE:
+        return manual_rms * (1 + check['allowance'] / 100.)
+    return manual_rms + check['allowance']
 
 
 def sample_arcs(arcs):
@@ -35,6 +52,7 @@ def weighted_error(sample, boundary):
 def prepare_checks(config, images=None):
     """Each check is independent; no tier can compensate for another tier."""
     checks = []
+    mode = allowance_mode(config)
     physical = score_unit(config) == PHYSICAL_UNIT
     metrics = {}
     def convert(view, points):
@@ -48,15 +66,19 @@ def prepare_checks(config, images=None):
         return metrics[view].transform(points)
     if 'tier_outlines' not in config:
         for view, points in sorted(config['outlines'].items(), key=lambda p: int(p[0])):
+            allowance = float(config['tolerances'][str(view)])
+            if not np.isfinite(allowance) or allowance < 0:
+                raise ValueError('Allowances must be finite and nonnegative.')
             checks.append(dict(key=int(view), view=int(view), tier=None,
-                sample=resample_trace(convert(view, points)), metric=metrics.get(int(view)), allowance=float(config['tolerances'][str(view)])))
+                sample=resample_trace(convert(view, points)), metric=metrics.get(int(view)),
+                allowance=allowance, allowance_mode=mode))
         return checks
     for view, tiers in sorted(config['tier_outlines'].items(), key=lambda p: int(p[0])):
         nonempty = {tier: [a for a in arcs if len(a)] for tier, arcs in tiers.items() if any(len(a) for a in arcs)}
         if any(t not in TIERS for t in nonempty):
             raise ValueError('Tier must be 1 or 2.')
         allowances = config['tier_tolerances'][str(view)]
-        if '1' in nonempty and '2' in nonempty and allowances['2'] < allowances['1']:
+        if mode == ABSOLUTE_ALLOWANCE and '1' in nonempty and '2' in nonempty and allowances['2'] < allowances['1']:
             raise ValueError('Tier 2 must have at least as much additional flexibility as Tier 1.')
         for tier in TIERS:
             if tier not in nonempty:
@@ -66,7 +88,7 @@ def prepare_checks(config, images=None):
                 raise ValueError('Tier allowances must be finite and nonnegative.')
             checks.append(dict(key='view_{}_tier_{}'.format(view, tier), view=int(view), tier=tier,
                                sample=sample_arcs([convert(view, arc) for arc in nonempty[tier]]),
-                               metric=metrics.get(int(view)), allowance=allowance))
+                               metric=metrics.get(int(view)), allowance=allowance, allowance_mode=mode))
     if not checks:
         raise ValueError('Draw at least one outline arc with two distinct points.')
     return checks
@@ -102,7 +124,7 @@ def check_errors(checks, boundaries):
 def passes_checks(scores, baseline, checks):
     if len(scores) != len(checks):
         raise ValueError('Every view/tier needs a score.')
-    return all(np.isfinite(score) and score <= baseline[check['key']] + check['allowance']
+    return all(np.isfinite(score) and score <= allowed_rms(check, baseline[check['key']])
                for score, check in zip(scores, checks))
 
 

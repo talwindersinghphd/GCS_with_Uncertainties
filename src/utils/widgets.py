@@ -5,6 +5,51 @@ import re
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 
+class PanelWheelFilter(QtCore.QObject):
+    """Scroll the surrounding panel instead of editing controls under the pointer."""
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        # A window-scoped application filter also covers controls added later,
+        # such as the time selector, and spin boxes' embedded line editors.
+        QtWidgets.QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, widget, event):
+        if (event.type() != QtCore.QEvent.Wheel or not isinstance(widget, QtWidgets.QWidget) or
+                not self.window.isAncestorOf(widget)):
+            return False
+        control = widget
+        while control is not None and control is not self.window:
+            # An open dropdown's list and the figure pages keep their own scrolling.
+            if isinstance(control, QtWidgets.QAbstractScrollArea):
+                return False
+            if isinstance(control, (QtWidgets.QAbstractSpinBox, QtWidgets.QComboBox, QtWidgets.QSlider)):
+                panel = control.parentWidget()
+                while panel is not None and panel is not self.window:
+                    if isinstance(panel, QtWidgets.QAbstractScrollArea):
+                        delta = event.pixelDelta()
+                        if not delta.isNull():
+                            # Some Qt styles ignore pixel-only trackpad events.
+                            x, y = delta.x(), delta.y()
+                            if event.modifiers() & QtCore.Qt.ShiftModifier and not x:
+                                x, y = y, 0
+                            panel.horizontalScrollBar().setValue(panel.horizontalScrollBar().value() - x)
+                            panel.verticalScrollBar().setValue(panel.verticalScrollBar().value() - y)
+                        else:
+                            viewport = panel.viewport()
+                            forwarded = QtGui.QWheelEvent(
+                                QtCore.QPointF(viewport.mapFromGlobal(event.globalPos())), event.globalPosF(),
+                                event.pixelDelta(), event.angleDelta(), event.buttons(), event.modifiers(),
+                                event.phase(), event.inverted(), event.source())
+                            QtWidgets.QApplication.sendEvent(viewport, forwarded)
+                        break
+                    panel = panel.parentWidget()
+                event.accept()
+                return True
+            control = control.parentWidget()
+        return False
+
+
 class CompactDoubleSpinBox(QtWidgets.QDoubleSpinBox):
     """Hide trailing fractional zeros while retaining the full stored precision."""
     def textFromValue(self, value):
